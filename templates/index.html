@@ -1,1 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="page-title">Stock Information</title>
+    <link rel="stylesheet" href="static/styles.css">
+    <link rel="stylesheet" href="static/styles_yfin.css"> <!-- Referință la noul fișier CSS -->
+    <script>
+        async function searchStock() {
+            const symbol = document.getElementById('stock-symbol').value.trim();
+            if (symbol) {
+                try {
+                    const response = await fetch(`/api/stock/${symbol}`);
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        document.getElementById('company-name').textContent = data.companyName;
+                        document.getElementById('last-close-price').textContent = `$${data.lastClosePrice}`;
+                        document.getElementById('last-close-date').textContent = data.lastCloseDate;
+                        document.getElementById('open').textContent = `$${data.openPrice}`;
+                        document.getElementById('regular-market-volume').textContent = data.volume;
+                        document.getElementById('previous-close').textContent = `$${data.previousClose}`;
+                        document.getElementById('market-cap').textContent = `$${data.marketCap}`;
+                        document.getElementById('beta').textContent = data.beta;
+                        document.getElementById('bid').textContent = data.bid;
+                        document.getElementById('ask').textContent = data.ask;
+                        document.getElementById('trailing-pe').textContent = data.trailingPE;
+                        document.getElementById('trailing-eps').textContent = data.trailingEps;
+                        document.getElementById('day-range').textContent = `${data.lowPrice} - ${data.highPrice}`;
+                        document.getElementById('week-52-range').textContent = `${data.fiftyTwoWeekLow} - ${data.fiftyTwoWeekHigh}`;
+                        document.getElementById('dividend-rate').textContent = `${data.dividendRate} (${data.dividendYield})`;
+                        document.getElementById('ex-dividend-date').textContent = data.exDividendDate;
+                        document.getElementById('average-volume').textContent = data.averageVolume;
+                        document.getElementById('target-mean-price').textContent = `$${data.targetMeanPrice}`;
+                        document.getElementById('exchange-info').textContent = data.exchangeInfo;
+                    } else {
+                        document.getElementById('company-name').textContent = 'Error';
+                        document.getElementById('last-close-price').textContent = '';
+                        document.getElementById('last-close-date').textContent = '';
+                        document.getElementById('open').textContent = '';
+                        document.getElementById('regular-market-volume').textContent = '';
+                        document.getElementById('previous-close').textContent = '';
+                        document.getElementById('market-cap').textContent = '';
+                        document.getElementById('beta').textContent = '';
+                        document.getElementById('bid').textContent = '';
+                        document.getElementById('ask').textContent = '';
+                        document.getElementById('trailing-pe').textContent = '';
+                        document.getElementById('trailing-eps').textContent = '';
+                        document.getElementById('day-range').textContent = '';
+                        document.getElementById('week-52-range').textContent = '';
+                        document.getElementById('dividend-rate').textContent = '';
+                        document.getElementById('ex-dividend-date').textContent = '';
+                        document.getElementById('average-volume').textContent = '';
+                        document.getElementById('target-mean-price').textContent = '';
+                        document.getElementById('exchange-info').textContent = 'No data found';
+                    }
+                } catch (error) {
+                    console.error('Error fetching stock data:', error);
+                    document.getElementById('company-name').textContent = 'Error';
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+    <section class="container">
+        <!-- Container pentru top info și prețul de închidere -->
+        <div class="top-container">
+            <div class="top-content">
+                <span class="exchange" id="exchange-info">NasdaqGS - Nasdaq Real Time Price • USD</span>
+                <div class="left">
+                    <h1 id="company-name">Company Name</h1>
+                    <div class="btns">
+                        <!-- Câmp de input pentru simbolul bursier și butonul "Search for Stock" -->
+                        <input type="text" id="stock-symbol" placeholder="Enter Stock Symbol" required>
+                        <a class="compare-btn" href="#" id="search-stock-btn" onclick="searchStock();">Search for Stock</a>
+                    </div>
+                </div>
+            </div>
+            <div class="price-info">
+                <div class="regular-market">
+                    <span class="label">Last Close Price:</span>
+                    <span class="value" id="last-close-price">$0.00</span>
+                    <span class="time" id="last-close-date">Date</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Container pentru informațiile suplimentare -->
+        <div class="additional-info">
+            <ul class="yf-tx3nkj">
+                <!-- Informațiile suplimentare despre stoc -->
+                <li><span class="label">Open:</span> <span id="open">$0.00</span></li>
+                <li><span class="label">Regular Market Volume:</span> <span id="regular-market-volume">0</span></li>
+                <li><span class="label">Previous Close:</span> <span id="previous-close">$0.00</span></li>
+                <li><span class="label">Market Cap (intraday):</span> <span id="market-cap">$0.00</span></li>
+                <li><span class="label">Beta:</span> <span id="beta">N/A</span></li>
+                <li><span class="label">Bid:</span> <span id="bid">N/A</span></li>
+                <li><span class="label">Ask:</span> <span id="ask">N/A</span></li>
+                <li><span class="label">Trailing P/E:</span> <span id="trailing-pe">N/A</span></li>
+                <li><span class="label">Trailing EPS:</span> <span id="trailing-eps">N/A</span></li>
+                <li><span class="label">Day Range:</span> <span id="day-range">$0.00 - $0.00</span></li>
+                <li><span class="label">52 Week Range:</span> <span id="week-52-range">$0.00 - $0.00</span></li>
+                <li><span class="label">Dividend Rate:</span> <span id="dividend-rate">0.00 (0.00%) (N/A)</span></li>
+                <li><span class="label">Ex-Dividend Date:</span> <span id="ex-dividend-date">N/A</span></li>
+                <li><span class="label">Average Volume:</span> <span id="average-volume">0</span></li>
+                <li><span class="label">Target Mean Price:</span> <span id="target-mean-price">$0.00</span></li>
+            </ul>
+        </div>
+
+        <!-- Container pentru grafic -->
+        <div>
+            <canvas id="myChart" width="400" height="200"></canvas> <!-- Elementul canvas pentru grafic -->
+        </div>
+
+        <!-- Noua secțiune pentru linkul Recent News și știri -->
+        <section class="news-section">
+            <!-- Link pentru Recent News -->
+            <div class="news-link">
+                <a href="#" id="recent-news-link">Recent News</a>
+            </div>
+
+            <!-- Container pentru afișarea știrilor recente -->
+            <div class="recent-news-container" id="recent-news-container">
+                <!-- Știrile recente vor fi încărcate aici -->
+            </div>
+        </section>
+    </section>
+
+    <!-- Adaugă Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="static/scripts.js"></script>
+
+    <!-- Script pentru gestionarea știrilor recente -->
+    <script>
+        document.getElementById('recent-news-link').addEventListener('click', function(event) {
+            event.preventDefault();
+            const companyName = document.getElementById('company-name').textContent;  // Obține numele companiei
+            const symbol = companyName.split(" ")[0];  // Presupunem că primul cuvânt din numele companiei este simbolul, ajustați dacă este nevoie
+            
+            // Actualizează textul linkului cu numele companiei
+            this.textContent = `Recent News ${companyName}`;
+
+            fetch(`/api/stock/${symbol}/news`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('recent-news-container').innerHTML = `<p>${data.error}</p>`;
+                    } else {
+                        const newsHtml = data.map(newsItem => `
+                            <div class="news-item">
+                                <a href="${newsItem.link}" target="_blank">${newsItem.title}</a>
+                                <p>${newsItem.publisher} - ${new Date(newsItem.publishedDate * 1000).toLocaleString()}</p>
+                            </div>
+                        `).join('');
+                        document.getElementById('recent-news-container').innerHTML = newsHtml;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching news:', error);
+                    document.getElementById('recent-news-container').innerHTML = '<p>Error fetching news.</p>';
+                });
+        });
+    </script>
+</body>
+</html>
 
