@@ -3,7 +3,7 @@ import yfinance as yf
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow all origins to access /api/* routes
+CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
 
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
@@ -129,5 +129,5 @@ def index():
     return render_template('index.html')
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)
 
