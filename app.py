@@ -1,19 +1,17 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import yfinance as yf
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow all origins to access /api/* routes
 
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
     try:
-        # Download data for 1 day with 1 day interval
         df = yf.download(symbol, period="1d", interval="1d")
         if df.empty:
             return jsonify({"error": "No data found"}), 404
 
-        # Extract the latest data
         latest_data = df.iloc[-1]
         last_close_price = latest_data['Close']
         last_close_date = latest_data.name.isoformat()
@@ -22,7 +20,6 @@ def get_stock_data(symbol):
         low_price = latest_data['Low']
         volume = latest_data['Volume']
 
-        # Get company info
         ticker = yf.Ticker(symbol)
         stock_info = ticker.info
 
@@ -82,12 +79,11 @@ def get_stock_data(symbol):
 def get_stock_news(symbol):
     try:
         ticker = yf.Ticker(symbol)
-        news_data = ticker.news  # Use ticker.news if available; if not, use an alternative
+        news_data = ticker.news
 
         if not news_data:
             return jsonify({"error": "No news found"}), 404
 
-        # Prepare news data
         news_items = [{
             "title": item.get('title'),
             "link": item.get('link'),
@@ -103,14 +99,12 @@ def get_stock_news(symbol):
 @app.route('/api/stock/<symbol>/intraday')
 def get_intraday_stock_data(symbol):
     try:
-        # Download intraday data for 1 day with 1 minute interval
         df = yf.download(symbol, period="1d", interval="1m")
         if df.empty:
             return jsonify({"error": "No intraday data found"}), 404
 
-        # Extract datetime, close price, open price, high price, low price, and volume
         intraday_data = {
-            "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),  
+            "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
             "close": df['Close'].tolist(),
             "open": df['Open'].tolist(),
             "high": df['High'].tolist(),
@@ -123,6 +117,47 @@ def get_intraday_stock_data(symbol):
     except Exception as e:
         app.logger.error(f"Error fetching intraday data: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/stock-data-by-date', methods=['GET'])
+def get_stock_data_by_date():
+    symbol = request.args.get('symbol')
+    date = request.args.get('date')
+
+    if not symbol or not date:
+        return jsonify({'error': 'Symbol and date are required'}), 400
+
+    stock = yf.Ticker(symbol)
+    hist = stock.history(start=date, end=date)
+    dividends = stock.dividends[start:date].sum()
+
+    if hist.empty:
+        return jsonify({'error': 'No data found for this date'}), 404
+
+    price = hist['Close'].iloc[0]
+    return jsonify({'price': price, 'dividends': dividends})
+
+@app.route('/api/stock/<symbol>/historical', methods=['GET'])
+def get_stock_historical(symbol):
+    period = request.args.get('period', '1d')  # Preluare parametru "period" din query string
+    try:
+        stock = yf.Ticker(symbol)
+        hist = stock.history(period=period)
+        if hist.empty:
+            return jsonify({"error": "No historical data found"}), 404
+        
+        data = {
+            "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
+            "close": hist['Close'].tolist(),
+            "open": hist['Open'].tolist(),
+            "high": hist['High'].tolist(),
+            "low": hist['Low'].tolist(),
+            "volume": hist['Volume'].tolist(),
+        }
+        return jsonify(data)
+    except Exception as e:
+        app.logger.error(f"Error fetching historical data for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/')
 def index():
