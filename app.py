@@ -122,7 +122,9 @@ def get_intraday_stock_data(symbol):
 def get_stock_data_by_date():
     symbol = request.args.get('symbol')
     date = request.args.get('date')
-
+    
+    app.logger.debug(f"Received request for symbol: {symbol}, date: {date}")
+    
     if not symbol or not date:
         return jsonify({'error': 'Symbol and date are required'}), 400
 
