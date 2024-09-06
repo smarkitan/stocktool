@@ -119,27 +119,30 @@ def get_intraday_stock_data(symbol):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stock-data-by-date', methods=['GET'])
-def get_stock_data_by_date():
+def fetch_stock_data_by_date():
     symbol = request.args.get('symbol')
     date = request.args.get('date')
-    
-    app.logger.debug(f"Received request for symbol: {symbol}, date: {date}")
-    
+
     if not symbol or not date:
         return jsonify({'error': 'Symbol and date are required'}), 400
 
-    stock = yf.Ticker(symbol)
-    hist = stock.history(start=date, end=date)
-    dividends = stock.dividends[start:date].sum()
+    try:
+        stock = yf.Ticker(symbol)
+        hist = stock.history(start=date, end=date)
+        dividends = stock.dividends[start:date].sum()
 
-    if hist.empty:
-        return jsonify({'error': 'No data found for this date'}), 404
+        if hist.empty:
+            return jsonify({'error': 'No data found for this date'}), 404
 
-    price = hist['Close'].iloc[0]
-    return jsonify({'price': price, 'dividends': dividends})
+        price = hist['Close'].iloc[0]
+        return jsonify({'price': price, 'dividends': dividends})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
-def get_stock_historical(symbol):
+def get_stock_historical_data(symbol):
     period = request.args.get('period', '1d')  # Preluare parametru "period" din query string
     try:
         stock = yf.Ticker(symbol)
@@ -159,7 +162,6 @@ def get_stock_historical(symbol):
     except Exception as e:
         app.logger.error(f"Error fetching historical data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/')
 def index():
