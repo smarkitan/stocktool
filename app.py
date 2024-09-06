@@ -127,25 +127,35 @@ def fetch_stock_data_by_date():
     if not symbol or not date:
         return jsonify({'error': 'Symbol and date are required'}), 400
 
-    # Validate date format
     try:
-        datetime.strptime(date, '%Y-%m-%d')  # Adjust the format if needed
-    except ValueError:
-        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+        # Convert date to datetime object
+        start_date = datetime.strptime(date, '%Y-%m-%d')
+        end_date = start_date + timedelta(days=1)
 
-    try:
         stock = yf.Ticker(symbol)
-        hist = stock.history(start=date, end=date)
-        dividends = stock.dividends[start:end].sum()  # Correcting the variable name here
+        hist = stock.history(start=start_date, end=end_date)
 
         if hist.empty:
-            return jsonify({'error': 'No data found for this date'}), 404
+            return jsonify({'error': f'No data found for {symbol} from {date} to {end_date.date()}'}), 404
 
-        price = hist['Close'].iloc[0]
-        return jsonify({'price': price, 'dividends': dividends})
+        # Example of defining start and end
+        start = start_date.strftime('%Y-%m-%d')
+        end = end_date.strftime('%Y-%m-%d')
+
+        # Process stock data
+        data = {
+            'datetime': hist.index.strftime('%Y-%m-%d').tolist(),
+            'close': hist['Close'].tolist(),
+            'open': hist['Open'].tolist(),
+            'high': hist['High'].tolist(),
+            'low': hist['Low'].tolist()
+        }
+
+        return jsonify(data)
     except Exception as e:
         app.logger.error(f"Error fetching stock data for {symbol} on {date}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
