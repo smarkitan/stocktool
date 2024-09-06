@@ -129,7 +129,7 @@ def fetch_stock_data_by_date():
     try:
         stock = yf.Ticker(symbol)
         hist = stock.history(start=date, end=date)
-        dividends = stock.dividends[start:date].sum()  # Fix the variable name here
+        dividends = stock.dividends[start:end].sum()  # Correcting the variable name here
 
         if hist.empty:
             return jsonify({'error': 'No data found for this date'}), 404
@@ -142,7 +142,7 @@ def fetch_stock_data_by_date():
 
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
-    period = request.args.get('period', '1d')  # Preluare parametru "period" din query string
+    period = request.args.get('period', '1d')  # Retrieve "period" parameter from query string
     try:
         stock = yf.Ticker(symbol)
         hist = stock.history(period=period)
@@ -168,4 +168,3 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
