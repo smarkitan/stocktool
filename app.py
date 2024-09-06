@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, render_template, request
 import yfinance as yf
 from flask_cors import CORS
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow all origins to access /api/* routes
@@ -93,7 +94,7 @@ def get_stock_news(symbol):
 
         return jsonify(news_items)
     except Exception as e:
-        app.logger.error(f"Error fetching stock news: {e}")
+        app.logger.error(f"Error fetching stock news: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stock/<symbol>/intraday')
@@ -115,7 +116,7 @@ def get_intraday_stock_data(symbol):
         return jsonify(intraday_data)
 
     except Exception as e:
-        app.logger.error(f"Error fetching intraday data: {e}")
+        app.logger.error(f"Error fetching intraday data: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stock-data-by-date', methods=['GET'])
@@ -125,6 +126,12 @@ def fetch_stock_data_by_date():
 
     if not symbol or not date:
         return jsonify({'error': 'Symbol and date are required'}), 400
+
+    # Validate date format
+    try:
+        datetime.strptime(date, '%Y-%m-%d')  # Adjust the format if needed
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
     try:
         stock = yf.Ticker(symbol)
@@ -137,7 +144,7 @@ def fetch_stock_data_by_date():
         price = hist['Close'].iloc[0]
         return jsonify({'price': price, 'dividends': dividends})
     except Exception as e:
-        app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
+        app.logger.error(f"Error fetching stock data for {symbol} on {date}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
