@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, render_template, request
 import yfinance as yf
 from flask_cors import CORS
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow all origins to access /api/* routes
@@ -119,44 +119,19 @@ def get_intraday_stock_data(symbol):
         app.logger.error(f"Error fetching intraday data: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/stock-data-by-date', methods=['GET'])
-def fetch_stock_data_by_date():
-    symbol = request.args.get('symbol')
-    date = request.args.get('date')
+def test_stock_data(symbol, start_date, end_date):
+    stock = yf.Ticker(symbol)
+    hist = stock.history(start=start_date, end=end_date)
 
-    if not symbol or not date:
-        return jsonify({'error': 'Symbol and date are required'}), 400
-
-    try:
-        # Convert date to datetime object
-        start_date = datetime.strptime(date, '%Y-%m-%d')
-        end_date = start_date + timedelta(days=1)
-
-        stock = yf.Ticker(symbol)
-        hist = stock.history(start=start_date, end=end_date)
-
-        if hist.empty:
-            return jsonify({'error': f'No data found for {symbol} from {date} to {end_date.date()}'}), 404
-
-        # Example of defining start and end
-        start = start_date.strftime('%Y-%m-%d')
-        end = end_date.strftime('%Y-%m-%d')
-
-        # Process stock data
-        data = {
-            'datetime': hist.index.strftime('%Y-%m-%d').tolist(),
-            'close': hist['Close'].tolist(),
-            'open': hist['Open'].tolist(),
-            'high': hist['High'].tolist(),
-            'low': hist['Low'].tolist()
-        }
-
-        return jsonify(data)
-    except Exception as e:
-        app.logger.error(f"Error fetching stock data for {symbol} on {date}: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
-
+    if hist.empty:
+        print(f"No data found for {symbol} from {start_date} to {end_date}")
+    else:
+        print("Data:", hist.index)
+        print("Close:", hist['Close'])
+        print("Open:", hist['Open'])
+        print("High:", hist['High'])
+        print("Low:", hist['Low'])
+    
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
     period = request.args.get('period', '1d')  # Retrieve "period" parameter from query string
@@ -178,6 +153,58 @@ def get_stock_historical_data(symbol):
     except Exception as e:
         app.logger.error(f"Error fetching historical data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/test_stock_data/<symbol>', methods=['GET'])
+def test_stock_data_route(symbol):
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    try:
+        # Retrieve historical data for the specified date range
+        stock = yf.Ticker(symbol)
+        hist = stock.history(start=start_date, end=end_date)
+
+        if hist.empty:
+            return jsonify({"error": f"No data found for {symbol} from {start_date} to {end_date}"}), 404
+        
+        # Obtain the most recent data (i.e., the latest entry in the historical data)
+        most_recent_hist = stock.history(period='1d')  # Get the most recent data
+        latest_data = most_recent_hist.iloc[-1] if not most_recent_hist.empty else None
+
+        if latest_data is not None:
+            last_close_price = latest_data['Close']
+            last_close_date = latest_data.name.isoformat()
+        else:
+            last_close_price = 'N/A'
+            last_close_date = 'N/A'
+
+        # Get last dividend information
+        info = stock.info
+        last_dividend_value = info.get('dividendRate', 'N/A')
+        last_dividend_date = info.get('exDividendDate', 'N/A')
+
+        # Prepare response data
+        data = {
+            "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
+            "close": hist['Close'].tolist(),
+            "open": hist['Open'].tolist(),
+            "high": hist['High'].tolist(),
+            "low": hist['Low'].tolist(),
+            "volume": hist['Volume'].tolist(),
+            "lastDividendValue": last_dividend_value,
+            "lastDividendDate": last_dividend_date,
+            "lastClosePrice": last_close_price,
+            "lastCloseDate": last_close_date
+        }
+
+        return jsonify(data)
+
+    except Exception as e:
+        app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+
 
 @app.route('/')
 def index():
