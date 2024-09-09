@@ -8,9 +8,11 @@ CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app
 
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
+    app.logger.info(f"Fetching stock data for symbol: {symbol}")
     try:
         df = yf.download(symbol, period="1d", interval="1d")
         if df.empty:
+            app.logger.warning(f"No data found for symbol: {symbol}")
             return jsonify({"error": "No data found"}), 404
 
         latest_data = df.iloc[-1]
@@ -28,6 +30,7 @@ def get_stock_data(symbol):
         exchange_info = "NasdaqGS - Nasdaq Real Time Price • USD"
         compare_link = f"/compare/{symbol}"
 
+        app.logger.info(f"Data fetched successfully for symbol: {symbol}")
         return jsonify({
             "companyName": company_name,
             "lastClosePrice": last_close_price,
@@ -76,14 +79,15 @@ def get_stock_data(symbol):
         app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
 @app.route('/api/stock/<symbol>/news')
 def get_stock_news(symbol):
+    app.logger.info(f"Fetching stock news for symbol: {symbol}")
     try:
         ticker = yf.Ticker(symbol)
         news_data = ticker.news
 
         if not news_data:
+            app.logger.warning(f"No news found for symbol: {symbol}")
             return jsonify({"error": "No news found"}), 404
 
         news_items = [{
@@ -93,17 +97,19 @@ def get_stock_news(symbol):
             "publishedDate": item.get('providerPublishTime')
         } for item in news_data]
 
+        app.logger.info(f"Stock news fetched successfully for symbol: {symbol}")
         return jsonify(news_items)
     except Exception as e:
-        app.logger.error(f"Error fetching stock news: {e}", exc_info=True)
+        app.logger.error(f"Error fetching stock news for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/stock/<symbol>/intraday')
 def get_intraday_stock_data(symbol):
+    app.logger.info(f"Fetching intraday stock data for symbol: {symbol}")
     try:
         df = yf.download(symbol, period="1d", interval="1m")
         if df.empty:
+            app.logger.warning(f"No intraday data found for symbol: {symbol}")
             return jsonify({"error": "No intraday data found"}), 404
 
         intraday_data = {
@@ -115,20 +121,21 @@ def get_intraday_stock_data(symbol):
             "volume": df['Volume'].tolist()
         }
 
+        app.logger.info(f"Intraday stock data fetched successfully for symbol: {symbol}")
         return jsonify(intraday_data)
-
     except Exception as e:
-        app.logger.error(f"Error fetching intraday data: {e}", exc_info=True)
+        app.logger.error(f"Error fetching intraday data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
     period = request.args.get('period', '1d')  # Retrieve "period" parameter from query string
+    app.logger.info(f"Fetching historical stock data for symbol: {symbol} with period: {period}")
     try:
         stock = yf.Ticker(symbol)
         hist = stock.history(period=period)
         if hist.empty:
+            app.logger.warning(f"No historical data found for symbol: {symbol} with period: {period}")
             return jsonify({"error": "No historical data found"}), 404
         
         data = {
@@ -139,23 +146,24 @@ def get_stock_historical_data(symbol):
             "low": hist['Low'].tolist(),
             "volume": hist['Volume'].tolist(),
         }
+        app.logger.info(f"Historical stock data fetched successfully for symbol: {symbol}")
         return jsonify(data)
     except Exception as e:
         app.logger.error(f"Error fetching historical data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/test_stock_data/<symbol>', methods=['GET'])
 def test_stock_data_route(symbol):
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
 
+    app.logger.info(f"Fetching test stock data for symbol: {symbol} from {start_date} to {end_date}")
     try:
-        # Retrieve historical data for the specified date range
         stock = yf.Ticker(symbol)
         hist = stock.history(start=start_date, end=end_date)
 
         if hist.empty:
+            app.logger.warning(f"No data found for symbol: {symbol} from {start_date} to {end_date}")
             return jsonify({"error": f"No data found for {symbol} from {start_date} to {end_date}"}), 404
         
         # Obtain the most recent data (i.e., the latest entry in the historical data)
@@ -188,12 +196,12 @@ def test_stock_data_route(symbol):
             "lastCloseDate": last_close_date
         }
 
+        app.logger.info(f"Test stock data fetched successfully for symbol: {symbol}")
         return jsonify(data)
 
     except Exception as e:
-        app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
+        app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/')
 def index():
