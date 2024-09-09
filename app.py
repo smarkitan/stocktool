@@ -76,6 +76,7 @@ def get_stock_data(symbol):
         app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/api/stock/<symbol>/news')
 def get_stock_news(symbol):
     try:
@@ -96,6 +97,7 @@ def get_stock_news(symbol):
     except Exception as e:
         app.logger.error(f"Error fetching stock news: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/stock/<symbol>/intraday')
 def get_intraday_stock_data(symbol):
@@ -119,19 +121,7 @@ def get_intraday_stock_data(symbol):
         app.logger.error(f"Error fetching intraday data: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-def test_stock_data(symbol, start_date, end_date):
-    stock = yf.Ticker(symbol)
-    hist = stock.history(start=start_date, end=end_date)
 
-    if hist.empty:
-        print(f"No data found for {symbol} from {start_date} to {end_date}")
-    else:
-        print("Data:", hist.index)
-        print("Close:", hist['Close'])
-        print("Open:", hist['Open'])
-        print("High:", hist['High'])
-        print("Low:", hist['Low'])
-    
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
     period = request.args.get('period', '1d')  # Retrieve "period" parameter from query string
@@ -153,6 +143,7 @@ def get_stock_historical_data(symbol):
     except Exception as e:
         app.logger.error(f"Error fetching historical data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/test_stock_data/<symbol>', methods=['GET'])
 def test_stock_data_route(symbol):
@@ -202,8 +193,6 @@ def test_stock_data_route(symbol):
     except Exception as e:
         app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
-
 
 
 @app.route('/')
