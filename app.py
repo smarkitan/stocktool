@@ -4,7 +4,7 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow all origins to access /api/* routes
+CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Allow all origins to access /api/* routes
 
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
