@@ -2,6 +2,9 @@ from flask import Flask, jsonify, render_template, request
 import yfinance as yf
 from flask_cors import CORS
 from datetime import datetime, timedelta
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Allow all origins to access /api/* routes
