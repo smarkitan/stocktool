@@ -210,41 +210,42 @@ def test_stock_data_route(symbol):
 @app.route('/api/simulate-trading-strategy', methods=['POST'])
 def simulate_trading_strategy():
     data = request.get_json()
-    tickers = data.get('tickers', ['AAPL'])
-    
-    app.logger.info(f"Simulating trading strategy for tickers: {tickers}")
+    tickers = data.get('tickers', ['AAPL'])  # Fallback to 'AAPL' if no ticker provided
+    symbol = tickers[0]  # Utilize the first ticker in the list for simulation
+
+    app.logger.info(f"Simulating trading strategy for symbol: {symbol}")
 
     try:
         # Step 2: Data Retrieval
-        data = yf.download(tickers, start='2000-01-01', end='2024-09-19')
-        close = data['Close'].dropna()
-        
+        stock_data = yf.download(symbol, start='2000-01-01', end='2024-09-19')
+        close = stock_data['Close'].dropna()
+
         if close.empty:
-            app.logger.warning(f"No data downloaded for tickers: {tickers}")
-            return jsonify({"error": "No data downloaded"}), 404
-        
+            app.logger.warning(f"No data downloaded for symbol: {symbol}")
+            return jsonify({"error": f"No data downloaded for symbol: {symbol}"}), 404
+
         close = close.to_frame()
-        close.columns = tickers
+        close.columns = [symbol]  # Set column name as the symbol
 
         # Step 3: Data Preprocessing and Feature Engineering
-        close['AAPL_Return'] = close['AAPL'].pct_change() * 100
-        close['AAPL_Open'] = close['AAPL'].shift(1)
-        close['AAPL_High'] = close[['AAPL', 'AAPL_Open']].max(axis=1)
-        close['AAPL_Low'] = close[['AAPL', 'AAPL_Open']].min(axis=1)
-        close['AAPL_High_Low_Range'] = (close['AAPL_High'] - close['AAPL_Low']) / close['AAPL_Open'] * 100
-        close['AAPL_Open_Close_Range'] = (close['AAPL'] - close['AAPL_Open']) / close['AAPL_Open'] * 100
+        close[f'{symbol}_Return'] = close[symbol].pct_change() * 100
+        close[f'{symbol}_Open'] = close[symbol].shift(1)
+        close[f'{symbol}_High'] = close[[symbol, f'{symbol}_Open']].max(axis=1)
+        close[f'{symbol}_Low'] = close[[symbol, f'{symbol}_Open']].min(axis=1)
+        close[f'{symbol}_High_Low_Range'] = (close[f'{symbol}_High'] - close[f'{symbol}_Low']) / close[f'{symbol}_Open'] * 100
+        close[f'{symbol}_Open_Close_Range'] = (close[symbol] - close[f'{symbol}_Open']) / close[f'{symbol}_Open'] * 100
         
-        close['AAPL_Trend'] = close['AAPL'].rolling(window=5).mean()
-        close['AAPL_Volatility'] = close['AAPL_Return'].rolling(window=5).std()
+        close[f'{symbol}_Trend'] = close[symbol].rolling(window=5).mean()
+        close[f'{symbol}_Volatility'] = close[f'{symbol}_Return'].rolling(window=5).std()
         close.dropna(inplace=True)
 
         # Creating Target Variable
-        close['Target'] = close['AAPL_Open_Close_Range'].shift(-1)
+        close['Target'] = close[f'{symbol}_Open_Close_Range'].shift(-1)
         close['Target_Label'] = close['Target'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
         close.dropna(inplace=True)
 
         # Splitting the Data
-        features = close[['AAPL_Return', 'AAPL_High_Low_Range', 'AAPL_Open_Close_Range', 'AAPL_Trend', 'AAPL_Volatility']]
+        features = close[[f'{symbol}_Return', f'{symbol}_High_Low_Range', f'{symbol}_Open_Close_Range', f'{symbol}_Trend', f'{symbol}_Volatility']]
         labels = close['Target_Label']
         X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.10, shuffle=False)
 
@@ -262,14 +263,14 @@ def simulate_trading_strategy():
 
         # Simulate Strategy Returns
         test_results['Predicted_Shifted'] = test_results['Predicted'].shift(1).fillna(0)
-        test_results['Strategy_Return'] = test_results['Predicted_Shifted'] * (close['AAPL_Open_Close_Range'].iloc[X_train.shape[0]:].values)
+        test_results['Strategy_Return'] = test_results['Predicted_Shifted'] * (close[f'{symbol}_Open_Close_Range'].iloc[X_train.shape[0]:].values)
         test_results['Cumulative_Strategy_Return'] = test_results['Strategy_Return'].cumsum()
-        test_results['Cumulative_AAPL_Return'] = close['AAPL_Open_Close_Range'].iloc[X_train.shape[0]:].cumsum()
+        test_results['Cumulative_Symbol_Return'] = close[f'{symbol}_Open_Close_Range'].iloc[X_train.shape[0]:].cumsum()
 
         # Prepare response data
         response_data = {
             "cumulativeStrategyReturn": test_results['Cumulative_Strategy_Return'].tolist(),
-            "cumulativeAAPLReturn": test_results['Cumulative_AAPL_Return'].tolist(),
+            "cumulativeSymbolReturn": test_results['Cumulative_Symbol_Return'].tolist(),
             "predictions": test_results[['Predicted', 'Actual', 'Strategy_Return']].tail().to_dict(orient='records')
         }
 
