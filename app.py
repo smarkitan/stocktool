@@ -282,6 +282,8 @@ def simulate_trading_strategy():
         return jsonify({"error": str(e)}), 500
 
 
+
+
 @app.route('/api/machine-learning-calculation', methods=['POST'])
 def machine_learning_calculation():
     data = request.get_json()
@@ -324,12 +326,12 @@ def machine_learning_calculation():
 
         # Evaluarea modelului
         y_pred = clf.predict(scaler.transform(X_test))
-        predictions = list(y_pred)
+        predictions = [int(pred) for pred in y_pred]  # Conversie la int
 
         # Pregătirea datelor pentru răspuns
         response_data = {
             "predictions": predictions,
-            "actual": y_test.astype(int).tolist()  # Convertim y_test la int
+            "actual": [int(actual) for actual in y_test.tolist()]  # Conversie la int
         }
 
         app.logger.info("Machine learning calculation successful.")
@@ -338,6 +340,7 @@ def machine_learning_calculation():
     except Exception as e:
         app.logger.error(f"Error during machine learning calculation: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 
 
