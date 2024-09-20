@@ -329,7 +329,7 @@ def machine_learning_calculation():
         # Pregătirea datelor pentru răspuns
         response_data = {
             "predictions": predictions,
-            "actual": y_test.tolist()
+            "actual": y_test.astype(int).tolist()  # Convertim y_test la int
         }
 
         app.logger.info("Machine learning calculation successful.")
@@ -338,6 +338,7 @@ def machine_learning_calculation():
     except Exception as e:
         app.logger.error(f"Error during machine learning calculation: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 
 
