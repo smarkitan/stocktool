@@ -182,16 +182,23 @@ def test_stock_data_route(symbol):
         last_dividend_value = info.get('dividendRate', 'N/A')
         last_dividend_date = info.get('exDividendDate', 'N/A')
 
-        response_data = {
-            "historicalData": hist.reset_index().to_dict(orient='records'),
-            "lastClosePrice": last_close_price,
-            "lastCloseDate": last_close_date,
+        # Prepare response data
+        data = {
+            "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
+            "close": hist['Close'].tolist(),
+            "open": hist['Open'].tolist(),
+            "high": hist['High'].tolist(),
+            "low": hist['Low'].tolist(),
+            "volume": hist['Volume'].tolist(),
             "lastDividendValue": last_dividend_value,
-            "lastDividendDate": last_dividend_date
+            "lastDividendDate": last_dividend_date,
+            "lastClosePrice": last_close_price,
+            "lastCloseDate": last_close_date
         }
 
         app.logger.info(f"Test stock data fetched successfully for symbol: {symbol}")
-        return jsonify(response_data)
+        return jsonify(data)
+
     except Exception as e:
         app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -243,6 +250,11 @@ def simulate_investment():
     except Exception as e:
         app.logger.error(f"Error simulating investment for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
