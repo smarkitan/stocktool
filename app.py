@@ -282,6 +282,64 @@ def simulate_trading_strategy():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/machine-learning-calculation', methods=['POST'])
+def machine_learning_calculation():
+    data = request.get_json()
+    tickers = data.get('tickers', ['AAPL'])  # Utilizează AAPL ca simbol implicit
+
+    app.logger.info(f"Starting machine learning calculation for tickers: {tickers}")
+
+    try:
+        # Obține datele pentru tickere
+        data = yf.download(tickers, start='2000-01-01', end=datetime.now().strftime('%Y-%m-%d'))
+        close = data['Close'].dropna()
+
+        if close.empty:
+            app.logger.warning(f"No data found for tickers: {tickers}")
+            return jsonify({"error": "No data found"}), 404
+
+        close = close.to_frame()
+        close.columns = tickers
+
+        # Prelucrarea datelor
+        ticker = tickers[0]
+        close[f'{ticker}_Return'] = close[ticker].pct_change() * 100
+        close.dropna(inplace=True)
+
+        # Crearea variabilei țintă
+        close['Target'] = close[f'{ticker}_Return'].shift(-1)
+        close['Target_Label'] = close['Target'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        close.dropna(inplace=True)
+
+        # Împărțirea datelor
+        features = close[[f'{ticker}_Return']]
+        labels = close['Target_Label']
+        X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.10, shuffle=False)
+
+        # Normalizarea și antrenarea modelului
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train_scaled, y_train)
+
+        # Evaluarea modelului
+        y_pred = clf.predict(scaler.transform(X_test))
+        predictions = list(y_pred)
+
+        # Pregătirea datelor pentru răspuns
+        response_data = {
+            "predictions": predictions,
+            "actual": y_test.tolist()
+        }
+
+        app.logger.info("Machine learning calculation successful.")
+        return jsonify(response_data)
+
+    except Exception as e:
+        app.logger.error(f"Error during machine learning calculation: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 
 
 @app.route('/')
