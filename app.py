@@ -204,52 +204,77 @@ def test_stock_data_route(symbol):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/simulate', methods=['POST'])
-def simulate_investment():
+@app.route('/api/simulate-trading-strategy', methods=['POST'])
+def simulate_trading_strategy():
     data = request.get_json()
-    symbol = data.get('symbol')
-    investment_amount = data.get('investmentAmount')
-    purchase_date = data.get('purchaseDate')
-    end_date = data.get('endDate')
-
-    app.logger.info(f"Simulating investment for symbol: {symbol}, amount: {investment_amount}, from {purchase_date} to {end_date}")
+    tickers = data.get('tickers', ['AAPL'])
+    
+    app.logger.info(f"Simulating trading strategy for tickers: {tickers}")
 
     try:
-        stock = yf.Ticker(symbol)
-        hist = stock.history(start=purchase_date, end=end_date)
-
-        if hist.empty:
-            app.logger.warning(f"No historical data found for symbol: {symbol} from {purchase_date} to {end_date}")
-            return jsonify({"error": "No historical data found"}), 404
+        # Step 2: Data Retrieval
+        data = yf.download(tickers, start='2000-01-01', end='2024-09-19')
+        close = data['Close'].dropna()
         
-        # Calculate the number of shares purchased
-        purchase_price = hist['Close'].iloc[0]
-        num_of_shares = investment_amount / purchase_price
+        if close.empty:
+            app.logger.warning(f"No data downloaded for tickers: {tickers}")
+            return jsonify({"error": "No data downloaded"}), 404
+        
+        close = close.to_frame()
+        close.columns = tickers
 
-        # Calculate current value
-        latest_data = stock.history(period='1d').iloc[-1]
-        current_price = latest_data['Close']
-        current_value = num_of_shares * current_price
+        # Step 3: Data Preprocessing and Feature Engineering
+        close['AAPL_Return'] = close['AAPL'].pct_change() * 100
+        close['AAPL_Open'] = close['AAPL'].shift(1)
+        close['AAPL_High'] = close[['AAPL', 'AAPL_Open']].max(axis=1)
+        close['AAPL_Low'] = close[['AAPL', 'AAPL_Open']].min(axis=1)
+        close['AAPL_High_Low_Range'] = (close['AAPL_High'] - close['AAPL_Low']) / close['AAPL_Open'] * 100
+        close['AAPL_Open_Close_Range'] = (close['AAPL'] - close['AAPL_Open']) / close['AAPL_Open'] * 100
+        
+        close['AAPL_Trend'] = close['AAPL'].rolling(window=5).mean()
+        close['AAPL_Volatility'] = close['AAPL_Return'].rolling(window=5).std()
+        close.dropna(inplace=True)
 
-        # Calculate profit and return percentage
-        profit = current_value - investment_amount
-        return_percentage = (profit / investment_amount) * 100 if investment_amount > 0 else 0
+        # Creating Target Variable
+        close['Target'] = close['AAPL_Open_Close_Range'].shift(-1)
+        close['Target_Label'] = close['Target'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        close.dropna(inplace=True)
+
+        # Splitting the Data
+        features = close[['AAPL_Return', 'AAPL_High_Low_Range', 'AAPL_Open_Close_Range', 'AAPL_Trend', 'AAPL_Volatility']]
+        labels = close['Target_Label']
+        X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.10, shuffle=False)
+
+        # Normalization and Model Training
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train_scaled, y_train)
+
+        # Model Evaluation
+        y_pred = clf.predict(scaler.transform(X_test))
+        test_results = X_test.copy()
+        test_results['Actual'] = y_test
+        test_results['Predicted'] = y_pred
+
+        # Simulate Strategy Returns
+        test_results['Predicted_Shifted'] = test_results['Predicted'].shift(1).fillna(0)
+        test_results['Strategy_Return'] = test_results['Predicted_Shifted'] * (close['AAPL_Open_Close_Range'].iloc[X_train.shape[0]:].values)
+        test_results['Cumulative_Strategy_Return'] = test_results['Strategy_Return'].cumsum()
+        test_results['Cumulative_AAPL_Return'] = close['AAPL_Open_Close_Range'].iloc[X_train.shape[0]:].cumsum()
 
         # Prepare response data
         response_data = {
-            "numOfShares": num_of_shares,
-            "purchasePrice": purchase_price,
-            "currentPrice": current_price,
-            "currentValue": current_value,
-            "profit": profit,
-            "returnPercentage": return_percentage
+            "cumulativeStrategyReturn": test_results['Cumulative_Strategy_Return'].tolist(),
+            "cumulativeAAPLReturn": test_results['Cumulative_AAPL_Return'].tolist(),
+            "predictions": test_results[['Predicted', 'Actual', 'Strategy_Return']].tail().to_dict(orient='records')
         }
 
-        app.logger.info(f"Simulation successful for symbol: {symbol}")
+        app.logger.info("Trading strategy simulation successful.")
         return jsonify(response_data)
 
     except Exception as e:
-        app.logger.error(f"Error simulating investment for {symbol}: {e}", exc_info=True)
+        app.logger.error(f"Error simulating trading strategy: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
