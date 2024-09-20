@@ -282,8 +282,6 @@ def simulate_trading_strategy():
         return jsonify({"error": str(e)}), 500
 
 
-
-
 @app.route('/api/machine-learning-calculation', methods=['POST'])
 def machine_learning_calculation():
     data = request.get_json()
@@ -306,15 +304,28 @@ def machine_learning_calculation():
         # Prelucrarea datelor
         ticker = tickers[0]
         close[f'{ticker}_Return'] = close[ticker].pct_change() * 100
+        
+        # Crearea caracteristicilor suplimentare
+        close[f'{ticker}_Open'] = close[ticker].shift(1)
+        close[f'{ticker}_High'] = close[[ticker, f'{ticker}_Open']].max(axis=1)
+        close[f'{ticker}_Low'] = close[[ticker, f'{ticker}_Open']].min(axis=1)
+        close[f'{ticker}_High_Low_Range'] = (close[f'{ticker}_High'] - close[f'{ticker}_Low']) / close[f'{ticker}_Open'] * 100
+        close[f'{ticker}_Open_Close_Range'] = (close[ticker] - close[f'{ticker}_Open']) / close[f'{ticker}_Open'] * 100
+        close[f'{ticker}_Trend'] = close[ticker].rolling(window=5).mean()  # 5-day moving average
+        close[f'{ticker}_Volatility'] = close[f'{ticker}_Return'].rolling(window=5).std()  # 5-day volatility
+        
+        # Dropping rows with NaN values
         close.dropna(inplace=True)
 
         # Crearea variabilei țintă
-        close['Target'] = close[f'{ticker}_Return'].shift(-1)
+        close['Target'] = close[f'{ticker}_Open_Close_Range'].shift(-1)
+
+        # Crearea etichetelor pentru țintă
         close['Target_Label'] = close['Target'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
         close.dropna(inplace=True)
 
         # Împărțirea datelor
-        features = close[[f'{ticker}_Return']]
+        features = close[[f'{ticker}_Return', f'{ticker}_High_Low_Range', f'{ticker}_Open_Close_Range', f'{ticker}_Trend', f'{ticker}_Volatility']]
         labels = close['Target_Label']
         X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.10, shuffle=False)
 
