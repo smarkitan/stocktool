@@ -3,11 +3,257 @@ import yfinance as yf
 from flask_cors import CORS
 from datetime import datetime, timedelta
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
+import pandas as pd
+import numpy as np
+from sklearn.metrics import mean_absolute_percentage_error
+from prophet import Prophet
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+import warnings
+import json
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Allow all origins to access /api/* routes
+CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Allow specific origins
+
+warnings.filterwarnings('ignore')  # Suprimă avertismentele pentru claritate
+
+# ===========================
+# Funcții pentru Modelul ML
+# ===========================
+
+def get_monthly_data(symbol, period="10y"):
+    df = yf.download(symbol, period=period, interval="1mo")
+    df = df.reset_index()
+    df = df[['Date', 'Close']]
+    df.rename(columns={'Date': 'ds', 'Close': 'y'}, inplace=True)
+    df['ds'] = pd.to_datetime(df['ds'])
+    df = df.sort_values('ds')
+    return df
+
+def train_test_split_ml(df, test_size=0.2):
+    split_index = int(len(df) * (1 - test_size))
+    train = df.iloc[:split_index]
+    test = df.iloc[split_index:]
+    return train, test
+
+def train_prophet_model(train):
+    model = Prophet()
+    model.fit(train)
+    return model
+
+def predict_prophet_model(model, periods):
+    future = model.make_future_dataframe(periods=periods, freq='M')
+    forecast = model.predict(future)
+    return forecast
+
+def prepare_lstm_data(train, test, scaler, look_back=12):
+    # Combine train and test for scaling
+    combined = pd.concat([train, test], axis=0)
+    scaled = scaler.fit_transform(combined[['y']])
+
+    # Split back
+    scaled_train = scaled[:len(train)]
+    scaled_test = scaled[len(train):]
+
+    # Create sequences
+    def create_sequences(data, look_back):
+        X, y = [], []
+        for i in range(look_back, len(data)):
+            X.append(data[i - look_back:i, 0])
+            y.append(data[i, 0])
+        return np.array(X), np.array(y)
+
+    X_train, y_train = create_sequences(scaled_train, look_back)
+    X_test, y_test = create_sequences(scaled_test, look_back)
+
+    # Reshape for LSTM
+    X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
+    X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
+
+    return X_train, y_train, X_test, y_test, scaled, combined
+
+def build_lstm_model(input_shape):
+    model = Sequential()
+    model.add(LSTM(50, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(0.2))
+    model.add(LSTM(50, return_sequences=False))
+    model.add(Dropout(0.2))
+    model.add(Dense(25))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+def evaluate_and_improve_model(test, predictions, model_name):
+    mape = mean_absolute_percentage_error(test['y'], predictions) * 100
+    return mape
+
+def train_and_predict(symbol):
+    # Colectare date
+    df = get_monthly_data(symbol, '10y')
+    train, test = train_test_split_ml(df, test_size=0.2)
+
+    # Dicționar pentru predicții
+    predictions_dict = {}
+
+    # Model Prophet
+    try:
+        prophet_model = train_prophet_model(train)
+        prophet_forecast = predict_prophet_model(prophet_model, periods=len(test))
+        prophet_pred = prophet_forecast['yhat'][-len(test):].values
+        prophet_mape = evaluate_and_improve_model(test, prophet_pred, 'Prophet')
+        predictions_dict['Prophet'] = {
+            "predictions": prophet_pred.tolist(),
+            "mape": prophet_mape
+        }
+    except Exception as e:
+        print(f"Prophet nu a putut fi antrenat: {e}")
+
+    # Model LSTM
+    try:
+        scaler = MinMaxScaler(feature_range=(0,1))
+        X_train, y_train, X_test, y_test, scaled, combined = prepare_lstm_data(train, test, scaler)
+        lstm_model = build_lstm_model((X_train.shape[1], 1))
+        early_stop = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+        lstm_model.fit(X_train, y_train, epochs=100, batch_size=16, verbose=0, callbacks=[early_stop])
+
+        # Predicții
+        lstm_pred_scaled = lstm_model.predict(X_test)
+        lstm_pred = scaler.inverse_transform(lstm_pred_scaled)
+        lstm_mape = evaluate_and_improve_model(test, lstm_pred.flatten(), 'LSTM')
+        predictions_dict['LSTM'] = {
+            "predictions": lstm_pred.flatten().tolist(),
+            "mape": lstm_mape
+        }
+    except Exception as e:
+        print(f"LSTM nu a putut fi antrenat: {e}")
+
+    # Determină cel mai bun model
+    best_model = None
+    best_mape = 100
+
+    for model_name, data in predictions_dict.items():
+        mape = data["mape"]
+        if mape < best_mape:
+            best_mape = mape
+            best_model = model_name
+
+    # Îmbunătățirea modelului dacă MAPE > 20%
+    if best_mape > 20 and best_model is not None:
+        print(f"Încercăm să îmbunătățim modelul {best_model} cu MAPE: {best_mape:.2f}%")
+        if best_model == 'Prophet':
+            try:
+                prophet_model = Prophet(daily_seasonality=False, yearly_seasonality=True, weekly_seasonality=False)
+                prophet_model.add_seasonality(name='monthly', period=30.5, fourier_order=5)
+                prophet_model.fit(train)
+                prophet_forecast = predict_prophet_model(prophet_model, periods=len(test))
+                prophet_pred = prophet_forecast['yhat'][-len(test):].values
+                prophet_mape = evaluate_and_improve_model(test, prophet_pred, 'Prophet')
+                predictions_dict['Prophet'] = {
+                    "predictions": prophet_pred.tolist(),
+                    "mape": prophet_mape
+                }
+                if prophet_mape < best_mape:
+                    best_mape = prophet_mape
+                    best_model = 'Prophet'
+            except Exception as e:
+                print(f"Prophet îmbunătățit nu a putut fi antrenat: {e}")
+
+        elif best_model == 'LSTM':
+            try:
+                # Re-antrenăm LSTM cu mai multe epoci
+                lstm_model = build_lstm_model((X_train.shape[1],1))
+                lstm_model.fit(X_train, y_train, epochs=200, batch_size=16, verbose=0, callbacks=[early_stop])
+                lstm_pred_scaled = lstm_model.predict(X_test)
+                lstm_pred = scaler.inverse_transform(lstm_pred_scaled)
+                lstm_mape = evaluate_and_improve_model(test, lstm_pred.flatten(), 'LSTM')
+                predictions_dict['LSTM'] = {
+                    "predictions": lstm_pred.flatten().tolist(),
+                    "mape": lstm_mape
+                }
+                if lstm_mape < best_mape:
+                    best_mape = lstm_mape
+                    best_model = 'LSTM'
+            except Exception as e:
+                print(f"LSTM îmbunătățit nu a putut fi antrenat: {e}")
+
+    # Selectează cel mai bun model cu MAPE <= 20%
+    selected_model = None
+    if best_mape <= 20:
+        selected_model = best_model
+    else:
+        print(f"Nu am reușit să atingem o MAPE de 20%. Cel mai bun model are o MAPE de {best_mape:.2f}%.")
+
+    # Generarea forecast-ului pentru următorii 10 ani
+    forecast_dates = []
+    forecast_prices = []
+
+    if selected_model:
+        if selected_model == 'Prophet':
+            try:
+                total_periods = 120  # 10 ani * 12 luni
+                forecast_future = predict_prophet_model(prophet_model, periods=total_periods)
+                forecast_dates = forecast_future['ds'].dt.strftime('%Y-%m').tolist()[-total_periods:]
+                forecast_prices = forecast_future['yhat'].tolist()[-total_periods:]
+            except Exception as e:
+                print(f"Prophet nu a putut genera forecast-ul: {e}")
+        elif selected_model == 'LSTM':
+            try:
+                # Previne dependențele pe termen lung prin utilizarea ultimelor date din train+test
+                last_sequence = scaled[-12:]  # 12 luni pentru look_back=12
+                lstm_forecast = []
+                for _ in range(120):
+                    last_sequence_reshaped = last_sequence.reshape((1, 12, 1))
+                    next_pred_scaled = lstm_model.predict(last_sequence_reshaped)
+                    next_pred = scaler.inverse_transform(next_pred_scaled)[0,0]
+                    lstm_forecast.append(next_pred)
+                    # Actualizează secvența
+                    next_scaled = scaler.transform(np.array([[next_pred]]))
+                    last_sequence = np.append(last_sequence[1:], next_scaled, axis=0)
+                forecast_prices = lstm_forecast
+                last_date = df['ds'].max()
+                forecast_dates = [(last_date + pd.DateOffset(months=i+1)).strftime('%Y-%m') for i in range(120)]
+            except Exception as e:
+                print(f"LSTM nu a putut genera forecast-ul: {e}")
+
+    # Pregătirea datelor istorice
+    historical_dates = df['ds'].dt.strftime('%Y-%m').tolist()
+    historical_prices = df['y'].tolist()
+
+    # Pregătirea datelor de predicție
+    test_dates = test['ds'].dt.strftime('%Y-%m').tolist()
+    test_actual = test['y'].tolist()
+    test_predicted = predictions_dict.get(selected_model, {}).get("predictions", [])
+
+    # Pregătirea datelor de forecast
+    forecast_data = {
+        "dates": forecast_dates,
+        "prices": forecast_prices
+    }
+
+    # Pregătirea răspunsului
+    response = {
+        "historical": {
+            "dates": historical_dates,
+            "prices": historical_prices
+        },
+        "test": {
+            "dates": test_dates,
+            "actual": test_actual,
+            "predicted": test_predicted
+        },
+        "forecast": forecast_data,
+        "best_model": selected_model,
+        "best_mape": best_mape
+    }
+
+    return response
+
+# ===========================
+# Endpoint-uri Existente
+# ===========================
 
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
@@ -97,7 +343,7 @@ def get_stock_news(symbol):
             "title": item.get('title'),
             "link": item.get('link'),
             "publisher": item.get('publisher'),
-            "publishedDate": item.get('providerPublishTime')
+            "publishedDate": datetime.fromtimestamp(item.get('providerPublishTime')).isoformat() if item.get('providerPublishTime') else 'N/A'
         } for item in news_data]
 
         app.logger.info(f"Stock news fetched successfully for symbol: {symbol}")
@@ -140,7 +386,7 @@ def get_stock_historical_data(symbol):
         if hist.empty:
             app.logger.warning(f"No historical data found for symbol: {symbol} with period: {period}")
             return jsonify({"error": "No historical data found"}), 404
-        
+
         data = {
             "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
             "close": hist['Close'].tolist(),
@@ -168,7 +414,7 @@ def test_stock_data_route(symbol):
         if hist.empty:
             app.logger.warning(f"No data found for symbol: {symbol} from {start_date} to {end_date}")
             return jsonify({"error": f"No data found for {symbol} from {start_date} to {end_date}"}), 404
-        
+
         # Obtain the most recent data (i.e., the latest entry in the historical data)
         most_recent_hist = stock.history(period='1d')  # Get the most recent data
         latest_data = most_recent_hist.iloc[-1] if not most_recent_hist.empty else None
@@ -183,7 +429,7 @@ def test_stock_data_route(symbol):
         # Get last dividend information
         info = stock.info
         last_dividend_value = info.get('dividendRate', 'N/A')
-        last_dividend_date = info.get('exDividendDate', 'N/A')
+        last_dividend_date = datetime.fromtimestamp(info['exDividendDate']).isoformat() if info.get('exDividendDate') else 'N/A'
 
         # Prepare response data
         data = {
@@ -206,23 +452,22 @@ def test_stock_data_route(symbol):
         app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
 @app.route('/api/simulate-trading-strategy', methods=['POST'])
 def simulate_trading_strategy():
     data = request.get_json()
     tickers = data.get('tickers', ['AAPL'])  # Dacă nu este furnizat niciun simbol, implicit este 'AAPL'
-    
+
     app.logger.info(f"Simulating trading strategy for tickers: {tickers}")
 
     try:
         # Pasul 2: Preluarea datelor
         data = yf.download(tickers, start='2000-01-01', end='2024-09-19')
         close = data['Close'].dropna()
-        
+
         if close.empty:
             app.logger.warning(f"No data downloaded for tickers: {tickers}")
             return jsonify({"error": "No data downloaded"}), 404
-        
+
         close = close.to_frame()
         close.columns = tickers
 
@@ -234,7 +479,7 @@ def simulate_trading_strategy():
         close[f'{ticker}_Low'] = close[[ticker, f'{ticker}_Open']].min(axis=1)
         close[f'{ticker}_High_Low_Range'] = (close[f'{ticker}_High'] - close[f'{ticker}_Low']) / close[f'{ticker}_Open'] * 100
         close[f'{ticker}_Open_Close_Range'] = (close[ticker] - close[f'{ticker}_Open']) / close[f'{ticker}_Open'] * 100
-        
+
         close[f'{ticker}_Trend'] = close[ticker].rolling(window=5).mean()
         close[f'{ticker}_Volatility'] = close[f'{ticker}_Return'].rolling(window=5).std()
         close.dropna(inplace=True)
@@ -281,7 +526,6 @@ def simulate_trading_strategy():
         app.logger.error(f"Error simulating trading strategy: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
 @app.route('/api/machine-learning-calculation', methods=['POST'])
 def machine_learning_calculation():
     data = request.get_json()
@@ -304,7 +548,7 @@ def machine_learning_calculation():
         # Prelucrarea datelor
         ticker = tickers[0]
         close[f'{ticker}_Return'] = close[ticker].pct_change() * 100
-        
+
         # Crearea caracteristicilor suplimentare
         close[f'{ticker}_Open'] = close[ticker].shift(1)
         close[f'{ticker}_High'] = close[[ticker, f'{ticker}_Open']].max(axis=1)
@@ -313,7 +557,7 @@ def machine_learning_calculation():
         close[f'{ticker}_Open_Close_Range'] = (close[ticker] - close[f'{ticker}_Open']) / close[f'{ticker}_Open'] * 100
         close[f'{ticker}_Trend'] = close[ticker].rolling(window=5).mean()  # 5-day moving average
         close[f'{ticker}_Volatility'] = close[f'{ticker}_Return'].rolling(window=5).std()  # 5-day volatility
-        
+
         # Dropping rows with NaN values
         close.dropna(inplace=True)
 
@@ -352,14 +596,32 @@ def machine_learning_calculation():
         app.logger.error(f"Error during machine learning calculation: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+# ===========================
+# Noua Funcționalitate: Predicții ML
+# ===========================
 
+@app.route('/api/predict_stock/<symbol>', methods=['GET'])
+def predict_stock(symbol):
+    app.logger.info(f"Starting prediction for symbol: {symbol}")
+    try:
+        prediction_result = train_and_predict(symbol)
+        app.logger.info(f"Prediction for {symbol} completed successfully.")
+        return jsonify(prediction_result)
+    except Exception as e:
+        app.logger.error(f"Error during prediction for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
-
-
+# ===========================
+# Endpoint-ul Principal
+# ===========================
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+# ===========================
+# Rularea Aplicației
+# ===========================
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
