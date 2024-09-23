@@ -1,14 +1,20 @@
+# app.py
 from flask import Flask, jsonify, render_template, request
 import yfinance as yf
 from flask_cors import CORS
 from datetime import datetime, timedelta
+import numpy as np
+import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, LSTM
-import numpy as np
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Allow all origins to access /api/* routes
+
+# Configure CORS to allow requests from your frontend
+CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Adjust the origin as needed
+
+### Existing Routes ###
 
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
@@ -207,17 +213,22 @@ def test_stock_data_route(symbol):
         app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
-
-##########################################
-###### MACHINE LEARNING starts here ######
-##########################################
-
+### New Machine Learning Prediction Route ###
 
 def predict_stock(symbol, num_years):
+    """
+    Predict future stock prices using an LSTM model and calculate investment returns.
+
+    Parameters:
+        symbol (str): Stock ticker symbol.
+        num_years (int): Number of years for prediction.
+
+    Returns:
+        dict: Contains predictions and investment data or an error message.
+    """
     try:
         period_past = f"{num_years}y"
-        period_future_days = 360 * num_years  # Approximate number of trading days
+        period_future_days = 360 * num_years  # Approximate number of trading days per year
 
         # Download historical data
         df = yf.download(symbol, period=period_past)
@@ -318,6 +329,16 @@ def predict_stock(symbol, num_years):
 
 @app.route('/api/predict', methods=['POST'])
 def api_predict():
+    """
+    Endpoint to predict future stock prices and calculate investment returns.
+
+    Expects a JSON payload with:
+        - symbol (str): Stock ticker symbol.
+        - num_years (int): Number of years for prediction.
+
+    Returns:
+        JSON: Predictions and investment data or an error message.
+    """
     data = request.get_json()
     symbol = data.get('symbol', '').upper()
     num_years = data.get('num_years', 10)
@@ -339,12 +360,13 @@ def api_predict():
 
     return jsonify(result)
 
-################## ML ends here ##################
-
+### Existing Root Route ###
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+### Running the Flask Application ###
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
