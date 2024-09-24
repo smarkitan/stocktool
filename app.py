@@ -2,7 +2,7 @@
 from flask import Flask, jsonify, render_template, request
 import yfinance as yf
 from flask_cors import CORS
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -12,92 +12,62 @@ from tensorflow.keras.layers import Dense, LSTM
 app = Flask(__name__)
 
 # Configure CORS to allow requests from your frontend
-CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Adjust the origin as needed
+CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
 
-### Existing Routes ###
+### API Routes ###
 
-@app.route('/api/stock/<symbol>')
+@app.route('/api/stock/<symbol>', methods=['GET'])
 def get_stock_data(symbol):
+    """Fetch latest stock data for a given symbol."""
     app.logger.info(f"Fetching stock data for symbol: {symbol}")
     try:
         df = yf.download(symbol, period="1d", interval="1d")
         if df.empty:
-            app.logger.warning(f"No data found for symbol: {symbol}")
             return jsonify({"error": "No data found"}), 404
 
         latest_data = df.iloc[-1]
-        last_close_price = latest_data['Close']
-        last_close_date = latest_data.name.isoformat()
-        open_price = latest_data['Open']
-        high_price = latest_data['High']
-        low_price = latest_data['Low']
-        volume = latest_data['Volume']
-
         ticker = yf.Ticker(symbol)
         stock_info = ticker.info
 
-        company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
-        exchange_info = "NasdaqGS - Nasdaq Real Time Price • USD"
-        compare_link = f"/compare/{symbol}"
-
+        response_data = {
+            "companyName": stock_info.get('longName', stock_info.get('shortName', symbol)),
+            "lastClosePrice": latest_data['Close'],
+            "lastCloseDate": latest_data.name.isoformat(),
+            "openPrice": latest_data['Open'],
+            "highPrice": latest_data['High'],
+            "lowPrice": latest_data['Low'],
+            "volume": latest_data['Volume'],
+            "exchangeInfo": "NasdaqGS - Nasdaq Real Time Price • USD",
+            "compareLink": f"/compare/{symbol}",
+            **{key: stock_info.get(key, 'N/A') for key in [
+                'regularMarketPreviousClose', 'marketCap', 'regularMarketOpen', 
+                'beta', 'bid', 'bidSize', 'trailingPE', 'ask', 'askSize',
+                'trailingEps', 'regularMarketDayLow', 'regularMarketDayHigh',
+                'fiftyTwoWeekLow', 'fiftyTwoWeekHigh', 'dividendRate', 
+                'dividendYield', 'regularMarketVolume', 'exDividendDate', 
+                'averageVolume', 'targetMeanPrice', 'enterpriseValue', 
+                'priceToBook', 'priceToSalesTrailing12Months', 
+                'enterpriseToEbitda', 'operatingMargins', 'grossMargins', 
+                'profitMargins', 'earningsGrowth', 'sector', 
+                'industry', 'totalRevenue', 'revenueGrowth', 
+                'operatingCashflow'
+            ]}
+        }
         app.logger.info(f"Data fetched successfully for symbol: {symbol}")
-        return jsonify({
-            "companyName": company_name,
-            "lastClosePrice": last_close_price,
-            "lastCloseDate": last_close_date,
-            "openPrice": open_price,
-            "highPrice": high_price,
-            "lowPrice": low_price,
-            "volume": volume,
-            "exchangeInfo": exchange_info,
-            "compareLink": compare_link,
-            "previousClose": stock_info.get('regularMarketPreviousClose', 'N/A'),
-            "marketCap": stock_info.get('marketCap', 'N/A'),
-            "open": stock_info.get('regularMarketOpen', 'N/A'),
-            "beta": stock_info.get('beta', 'N/A'),
-            "bid": stock_info.get('bid', 'N/A'),
-            "bidSize": stock_info.get('bidSize', 'N/A'),
-            "trailingPE": stock_info.get('trailingPE', 'N/A'),
-            "ask": stock_info.get('ask', 'N/A'),
-            "askSize": stock_info.get('askSize', 'N/A'),
-            "trailingEps": stock_info.get('trailingEps', 'N/A'),
-            "regularMarketDayLow": stock_info.get('regularMarketDayLow', 'N/A'),
-            "regularMarketDayHigh": stock_info.get('regularMarketDayHigh', 'N/A'),
-            "fiftyTwoWeekLow": stock_info.get('fiftyTwoWeekLow', 'N/A'),
-            "fiftyTwoWeekHigh": stock_info.get('fiftyTwoWeekHigh', 'N/A'),
-            "dividendRate": stock_info.get('dividendRate', 'N/A'),
-            "dividendYield": stock_info.get('dividendYield', 'N/A'),
-            "regularMarketVolume": stock_info.get('regularMarketVolume', 'N/A'),
-            "exDividendDate": stock_info.get('exDividendDate', 'N/A'),
-            "averageVolume": stock_info.get('averageVolume', 'N/A'),
-            "targetMeanPrice": stock_info.get('targetMeanPrice', 'N/A'),
-            "enterpriseValue": stock_info.get('enterpriseValue', 'N/A'),
-            "priceToBook": stock_info.get('priceToBook', 'N/A'),
-            "priceToSalesTrailing12Months": stock_info.get('priceToSalesTrailing12Months', 'N/A'),
-            "enterpriseToEbitda": stock_info.get('enterpriseToEbitda', 'N/A'),
-            "operatingMargins": stock_info.get('operatingMargins', 'N/A'),
-            "grossMargins": stock_info.get('grossMargins', 'N/A'),
-            "profitMargins": stock_info.get('profitMargins', 'N/A'),
-            "earningsGrowth": stock_info.get('earningsGrowth', 'N/A'),
-            "sector": stock_info.get('sector', 'N/A'),
-            "industry": stock_info.get('industry', 'N/A'),
-            "totalRevenue": stock_info.get('totalRevenue', 'N/A'),
-            "revenueGrowth": stock_info.get('revenueGrowth', 'N/A'),
-            "operatingCashflow": stock_info.get('operatingCashflow', 'N/A')
-        })
+        return jsonify(response_data)
     except Exception as e:
         app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/stock/<symbol>/news')
+@app.route('/api/stock/<symbol>/news', methods=['GET'])
 def get_stock_news(symbol):
+    """Fetch news related to a given stock symbol."""
     app.logger.info(f"Fetching stock news for symbol: {symbol}")
     try:
         ticker = yf.Ticker(symbol)
         news_data = ticker.news
 
         if not news_data:
-            app.logger.warning(f"No news found for symbol: {symbol}")
             return jsonify({"error": "No news found"}), 404
 
         news_items = [{
@@ -113,13 +83,13 @@ def get_stock_news(symbol):
         app.logger.error(f"Error fetching stock news for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/stock/<symbol>/intraday')
+@app.route('/api/stock/<symbol>/intraday', methods=['GET'])
 def get_intraday_stock_data(symbol):
+    """Fetch intraday stock data for a given symbol."""
     app.logger.info(f"Fetching intraday stock data for symbol: {symbol}")
     try:
         df = yf.download(symbol, period="1d", interval="1m")
         if df.empty:
-            app.logger.warning(f"No intraday data found for symbol: {symbol}")
             return jsonify({"error": "No intraday data found"}), 404
 
         intraday_data = {
@@ -139,13 +109,13 @@ def get_intraday_stock_data(symbol):
 
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
-    period = request.args.get('period', '1d')  # Retrieve "period" parameter from query string
+    """Fetch historical stock data for a given symbol with an optional period."""
+    period = request.args.get('period', '1d')
     app.logger.info(f"Fetching historical stock data for symbol: {symbol} with period: {period}")
     try:
         stock = yf.Ticker(symbol)
         hist = stock.history(period=period)
         if hist.empty:
-            app.logger.warning(f"No historical data found for symbol: {symbol} with period: {period}")
             return jsonify({"error": "No historical data found"}), 404
         
         data = {
@@ -164,6 +134,7 @@ def get_stock_historical_data(symbol):
 
 @app.route('/api/test_stock_data/<symbol>', methods=['GET'])
 def test_stock_data_route(symbol):
+    """Fetch test stock data for a given symbol within a specified date range."""
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
 
@@ -173,26 +144,16 @@ def test_stock_data_route(symbol):
         hist = stock.history(start=start_date, end=end_date)
 
         if hist.empty:
-            app.logger.warning(f"No data found for symbol: {symbol} from {start_date} to {end_date}")
             return jsonify({"error": f"No data found for {symbol} from {start_date} to {end_date}"}), 404
         
-        # Obtain the most recent data (i.e., the latest entry in the historical data)
-        most_recent_hist = stock.history(period='1d')  # Get the most recent data
-        latest_data = most_recent_hist.iloc[-1] if not most_recent_hist.empty else None
+        latest_data = stock.history(period='1d').iloc[-1] if not stock.history(period='1d').empty else None
 
-        if latest_data is not None:
-            last_close_price = latest_data['Close']
-            last_close_date = latest_data.name.isoformat()
-        else:
-            last_close_price = 'N/A'
-            last_close_date = 'N/A'
+        last_close_price = latest_data['Close'] if latest_data is not None else 'N/A'
+        last_close_date = latest_data.name.isoformat() if latest_data is not None else 'N/A'
 
-        # Get last dividend information
-        info = stock.info
-        last_dividend_value = info.get('dividendRate', 'N/A')
-        last_dividend_date = info.get('exDividendDate', 'N/A')
+        last_dividend_value = stock.info.get('dividendRate', 'N/A')
+        last_dividend_date = stock.info.get('exDividendDate', 'N/A')
 
-        # Prepare response data
         data = {
             "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
             "close": hist['Close'].tolist(),
@@ -208,42 +169,28 @@ def test_stock_data_route(symbol):
 
         app.logger.info(f"Test stock data fetched successfully for symbol: {symbol}")
         return jsonify(data)
-
     except Exception as e:
         app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-### New Machine Learning Prediction Route ###
+### Machine Learning Prediction Route ###
 
-def predict_stock(symbol, num_years):
-    """
-    Predict future stock prices using an LSTM model and calculate investment returns.
-
-    Parameters:
-        symbol (str): Stock ticker symbol.
-        num_years (int): Number of years for prediction.
-
-    Returns:
-        dict: Contains predictions and investment data or an error message.
-    """
+@app.route('/api/predict_stock/<symbol>/<int:num_years>', methods=['GET'])
+def predict_stock_route(symbol, num_years):
+    """Predict future stock prices using an LSTM model."""
+    app.logger.info(f"Predicting stock prices for symbol: {symbol} over the next {num_years} years.")
     try:
         period_past = f"{num_years}y"
-        period_future_days = 360 * num_years  # Approximate number of trading days per year
+        period_future_days = 360 * num_years
 
-        # Download historical data
         df = yf.download(symbol, period=period_past)
-
         if df.empty:
-            return {"error": "No data found for the given symbol and period."}
+            return jsonify({"error": "No data found for the given symbol and period."}), 404
 
-        # Use 'Close' prices for prediction
         data = df['Close'].values.reshape(-1, 1)
-
-        # Normalize data
         scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(data)
 
-        # Define time window
         look_back = 60
         x_train, y_train = [], []
 
@@ -252,121 +199,43 @@ def predict_stock(symbol, num_years):
             y_train.append(scaled_data[i, 0])
 
         x_train, y_train = np.array(x_train), np.array(y_train)
-
-        # Reshape for LSTM
         x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
 
-        # Build LSTM model
         model = Sequential()
         model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1)))
-        model.add(LSTM(units=50))
+        model.add(LSTM(units=50, return_sequences=False))
+        model.add(Dense(units=25))
         model.add(Dense(units=1))
 
-        # Compile model
         model.compile(optimizer='adam', loss='mean_squared_error')
+        model.fit(x_train, y_train, batch_size=1, epochs=1)
 
-        # Train model
-        model.fit(x_train, y_train, epochs=10, batch_size=32, verbose=0)
+        x_test = scaled_data[-look_back:].reshape(1, -1, 1)
 
-        # Prepare data for prediction
-        test_data = scaled_data[-look_back:]
-        test_data = np.reshape(test_data, (1, look_back, 1))
-
-        predictions = []
+        predicted_prices = []
         for _ in range(period_future_days):
-            predicted_price = model.predict(test_data, verbose=0)
-            predictions.append(predicted_price[0, 0])
-            test_data = np.append(test_data[:, 1:, :], [[predicted_price]], axis=1)
+            predicted_price = model.predict(x_test)
+            predicted_prices.append(predicted_price[0][0])
+            x_test = np.append(x_test[:, 1:, :], predicted_price.reshape(1, 1, 1), axis=1)
 
-        # Denormalize predictions
-        predictions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten().tolist()
+        predicted_prices = scaler.inverse_transform(np.array(predicted_prices).reshape(-1, 1)).flatten()
 
-        # Investment Calculations
-        today = datetime.today()
-        past_date = today - timedelta(days=365 * num_years)
-        df_past = yf.download(symbol, start=past_date.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
-
-        if df_past.empty:
-            return {"error": "Insufficient historical data for investment calculations."}
-
-        price_past = df_past['Close'].iloc[0]
-        price_today = df_past['Close'].iloc[-1]
-
-        # Investment 1: 1000 Euros invested num_years ago
-        invest_initial = 1000
-        num_shares = invest_initial / price_past
-        value_today = num_shares * price_today
-
-        # Investment 2: 1000 Euros invested today
-        invest_future_initial = 1000
-        num_shares_future = invest_future_initial / price_today
-        predicted_price_future = predictions[-1]
-        value_future = num_shares_future * predicted_price_future
-
-        investment_data = {
-            "investment_initial": {
-                "description": f"1000 Euros invested {num_years} years ago:",
-                "price_past": round(price_past, 2),
-                "num_shares": round(num_shares, 4),
-                "value_today": round(value_today, 2)
-            },
-            "investment_future": {
-                "description": "1000 Euros invested today:",
-                "price_today": round(price_today, 2),
-                "num_shares_future": round(num_shares_future, 4),
-                "predicted_price_future": round(predicted_price_future, 2),
-                "value_future": round(value_future, 2)
-            }
+        response = {
+            "predictedPrices": predicted_prices.tolist(),
+            "message": f"Predicted prices for the next {period_future_days} days."
         }
-
-        return {
-            "predictions": predictions,
-            "investment_data": investment_data
-        }
-
+        app.logger.info(f"Predicted stock prices successfully for symbol: {symbol}")
+        return jsonify(response)
     except Exception as e:
-        return {"error": str(e)}
+        app.logger.error(f"Error predicting stock prices for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/predict', methods=['POST'])
-def api_predict():
-    """
-    Endpoint to predict future stock prices and calculate investment returns.
-
-    Expects a JSON payload with:
-        - symbol (str): Stock ticker symbol.
-        - num_years (int): Number of years for prediction.
-
-    Returns:
-        JSON: Predictions and investment data or an error message.
-    """
-    data = request.get_json()
-    symbol = data.get('symbol', '').upper()
-    num_years = data.get('num_years', 10)
-
-    if not symbol:
-        return jsonify({"error": "Symbol is required."}), 400
-
-    try:
-        num_years = int(num_years)
-        if num_years <= 0:
-            return jsonify({"error": "Number of years must be a positive integer."}), 400
-    except ValueError:
-        return jsonify({"error": "Number of years must be an integer."}), 400
-
-    result = predict_stock(symbol, num_years)
-
-    if "error" in result:
-        return jsonify(result), 400
-
-    return jsonify(result)
-
-### Existing Root Route ###
+### Main Route ###
 
 @app.route('/')
-def index():
+def home():
+    """Render the home page."""
     return render_template('index.html')
 
-### Running the Flask Application ###
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    app.run(debug=True)
