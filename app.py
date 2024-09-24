@@ -9,6 +9,38 @@ from sklearn.ensemble import RandomForestClassifier
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Allow all origins to access /api/* routes
 
+#### yahoonews.js ####
+
+@app.route('/api/stock/simple/<symbol>', methods=['GET'])
+def get_simple_stock_data(symbol):
+    try:
+        # Preluăm datele istorice pentru o zi (ultima zi)
+        df = yf.download(symbol, period="1d", interval="1d")
+        if df.empty:
+            return jsonify({"error": "No data found"}), 404
+
+        latest_data = df.iloc[-1]
+        last_close_price = latest_data['Close']
+        previous_close = latest_data['Open']  # Pentru exemplificare, luăm "open" ca fiind prețul de deschidere
+
+        # Extragem numele companiei folosind Ticker.info
+        ticker = yf.Ticker(symbol)
+        stock_info = ticker.info
+        company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
+
+        return jsonify({
+            "company": company_name,
+            "symbol": symbol,
+            "lastClosePrice": last_close_price,
+            "previousClose": previous_close
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+#### yahoonews.js (end) ####
+
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
     app.logger.info(f"Fetching stock data for symbol: {symbol}")
