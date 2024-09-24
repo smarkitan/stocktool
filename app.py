@@ -327,39 +327,30 @@ def predict_stock(symbol, num_years):
     except Exception as e:
         return {"error": str(e)}
 
-@app.route('/api/predict', methods=['POST'])
-def api_predict():
+@app.route('/api/predict/<string:symbol>/<int:num_years>', methods=['GET'])
+def api_predict(symbol, num_years):
     """
     Endpoint to predict future stock prices and calculate investment returns.
 
-    Expects a JSON payload with:
+    Expects parameters in the URL:
         - symbol (str): Stock ticker symbol.
         - num_years (int): Number of years for prediction.
 
     Returns:
         JSON: Predictions and investment data or an error message.
     """
-    data = request.get_json()
-    symbol = data.get('symbol', '').upper()
-    num_years = data.get('num_years', 10)
-
     if not symbol:
         return jsonify({"error": "Symbol is required."}), 400
 
-    try:
-        num_years = int(num_years)
-        if num_years <= 0:
-            return jsonify({"error": "Number of years must be a positive integer."}), 400
-    except ValueError:
-        return jsonify({"error": "Number of years must be an integer."}), 400
+    if num_years <= 0:
+        return jsonify({"error": "Number of years must be a positive integer."}), 400
 
-    result = predict_stock(symbol, num_years)
+    result = predict_stock(symbol.upper(), num_years)
 
     if "error" in result:
         return jsonify(result), 400
 
     return jsonify(result)
-
 ### Existing Root Route ###
 
 @app.route('/')
