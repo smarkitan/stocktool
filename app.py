@@ -2,12 +2,9 @@ from flask import Flask, jsonify, render_template, request
 import yfinance as yf
 from flask_cors import CORS
 from datetime import datetime, timedelta
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})  # Allow all origins to access /api/* routes
+CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
 
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
@@ -45,7 +42,7 @@ def get_stock_data(symbol):
             "exchangeInfo": exchange_info,
             "compareLink": compare_link,
             "previousClose": stock_info.get('regularMarketPreviousClose', 'N/A'),
-            "marketCap": stock_info.get('marketCap', 'N/A'),
+             "marketCap": stock_info.get('marketCap', 'N/A'),
             "open": stock_info.get('regularMarketOpen', 'N/A'),
             "beta": stock_info.get('beta', 'N/A'),
             "bid": stock_info.get('bid', 'N/A'),
@@ -130,9 +127,31 @@ def get_intraday_stock_data(symbol):
         app.logger.error(f"Error fetching intraday data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/stock/<symbol>/intraday-short', methods=['GET'])
+def get_intraday_short_data(symbol):
+    app.logger.info(f"Fetching short intraday stock data for symbol: {symbol}")
+    try:
+        df = yf.download(symbol, period="1d", interval="1m")
+        if df.empty:
+            app.logger.warning(f"No intraday data found for symbol: {symbol}")
+            return jsonify({"error": "No intraday data found"}), 404
+
+        # Return only the necessary fields for the chart
+        short_intraday_data = {
+            "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
+            "close": df['Close'].tolist(),
+            "open": df['Open'].tolist(),
+        }
+
+        app.logger.info(f"Short intraday stock data fetched successfully for symbol: {symbol}")
+        return jsonify(short_intraday_data)
+    except Exception as e:
+        app.logger.error(f"Error fetching short intraday data for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
-    period = request.args.get('period', '1d')  # Retrieve "period" parameter from query string
+    period = request.args.get('period', '1d')
     app.logger.info(f"Fetching historical stock data for symbol: {symbol} with period: {period}")
     try:
         stock = yf.Ticker(symbol)
@@ -169,8 +188,7 @@ def test_stock_data_route(symbol):
             app.logger.warning(f"No data found for symbol: {symbol} from {start_date} to {end_date}")
             return jsonify({"error": f"No data found for {symbol} from {start_date} to {end_date}"}), 404
         
-        # Obtain the most recent data (i.e., the latest entry in the historical data)
-        most_recent_hist = stock.history(period='1d')  # Get the most recent data
+        most_recent_hist = stock.history(period='1d')
         latest_data = most_recent_hist.iloc[-1] if not most_recent_hist.empty else None
 
         if latest_data is not None:
@@ -180,12 +198,10 @@ def test_stock_data_route(symbol):
             last_close_price = 'N/A'
             last_close_date = 'N/A'
 
-        # Get last dividend information
         info = stock.info
         last_dividend_value = info.get('dividendRate', 'N/A')
         last_dividend_date = info.get('exDividendDate', 'N/A')
 
-        # Prepare response data
         data = {
             "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
             "close": hist['Close'].tolist(),
@@ -205,7 +221,6 @@ def test_stock_data_route(symbol):
     except Exception as e:
         app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/')
 def index():
