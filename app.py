@@ -222,6 +222,39 @@ def test_stock_data_route(symbol):
         app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+
+
+@app.route('/api/stock/simple/<symbol>', methods=['GET'])
+def get_simple_stock_data(symbol):
+    try:
+        # Preluăm datele istorice pentru o zi (ultima zi)
+        df = yf.download(symbol, period="1d", interval="1d")
+        if df.empty:
+            return jsonify({"error": "No data found"}), 404
+
+        latest_data = df.iloc[-1]
+        last_close_price = latest_data['Close']
+        previous_close = latest_data['Open']  # Pentru exemplificare, luăm "open" ca fiind prețul de deschidere
+
+        # Extragem numele companiei folosind Ticker.info
+        ticker = yf.Ticker(symbol)
+        stock_info = ticker.info
+        company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
+
+        return jsonify({
+            "company": company_name,
+            "symbol": symbol,
+            "lastClosePrice": last_close_price,
+            "previousClose": previous_close
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
