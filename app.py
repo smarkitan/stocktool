@@ -207,8 +207,6 @@ def test_stock_data_route(symbol):
         return jsonify({"error": str(e)}), 500
 
 
-
-
 @app.route('/')
 def index():
     return render_template('index.html')
