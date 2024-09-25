@@ -1,7 +1,10 @@
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request 
 import yfinance as yf
 from flask_cors import CORS
 from datetime import datetime, timedelta
+from sklearn.linear_model import LinearRegression
+import numpy as np
+import pandas as pd
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
@@ -254,6 +257,123 @@ def get_simple_stock_data(symbol):
 
 
 
+########## New Machine Learning Prediction Route ########
+
+
+
+@app.route('/api/stock/<symbol>/predict', methods=['GET'])
+def predict_stock(symbol):
+    # Retrieve query parameters with default values
+    amount = float(request.args.get('amount', 1000))
+    currency = request.args.get('currency', 'USD').upper()
+    years = int(request.args.get('years', 5))
+
+    try:
+        # Fetch historical stock data with maximum available period
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period='max')
+        if hist.empty:
+            app.logger.warning(f"No historical data found for symbol: {symbol}")
+            return jsonify({"error": "No historical data found"}), 404
+
+        hist = hist.reset_index()
+        hist['Date'] = pd.to_datetime(hist['Date'])
+
+        # Get the latest available date and closing price
+        latest_date = hist['Date'].max()
+        latest_price = hist.loc[hist['Date'] == latest_date, 'Close'].values[0]
+
+        # Calculate the date 'years' ago
+        past_date = latest_date - pd.DateOffset(years=years)
+        past_data = hist[hist['Date'] <= past_date]
+
+        if past_data.empty:
+            app.logger.warning(f"Not enough historical data to get price {years} years ago for symbol: {symbol}")
+            price_past = 'N/A'
+        else:
+            closest_past_date = past_data['Date'].max()
+            price_past = hist.loc[hist['Date'] == closest_past_date, 'Close'].values[0]
+
+        # Prepare data for the Linear Regression model
+        hist_sorted = hist.sort_values('Date')
+        hist_sorted['Date_ordinal'] = hist_sorted['Date'].map(datetime.toordinal)
+        X = hist_sorted['Date_ordinal'].values.reshape(-1, 1)
+        y = hist_sorted['Close'].values
+
+        # Train the Linear Regression model
+        model = LinearRegression()
+        model.fit(X, y)
+
+        # Predict future prices for each year
+        future_dates = []
+        future_prices = []
+        for i in range(1, years + 1):
+            year_future_date = latest_date + pd.DateOffset(years=i)
+            year_future_date_ordinal = year_future_date.toordinal()
+            price_pred = model.predict(np.array([[year_future_date_ordinal]]))[0]
+            price_pred = max(0, price_pred)  # Ensure non-negative prices
+
+            # Currency conversion if needed
+            if currency == 'EUR':
+                exchange_symbol = 'USDEUR=X'
+                exchange_hist = yf.Ticker(exchange_symbol).history(period='1d')
+                if exchange_hist.empty:
+                    app.logger.warning(f"No exchange rate data found for symbol: {exchange_symbol}")
+                    return jsonify({"error": "No exchange rate data found"}), 404
+                exchange_rate = exchange_hist['Close'].iloc[-1]
+                price_pred *= exchange_rate
+
+            future_dates.append(year_future_date.strftime('%Y-%m-%d'))
+            future_prices.append(round(price_pred, 2))
+
+        # Calculate investment details
+        num_shares = amount / latest_price
+        value_today = num_shares * latest_price
+        value_future = num_shares * future_prices[-1]
+
+        # Currency conversion for current prices if needed
+        if currency == 'EUR':
+            exchange_symbol = 'USDEUR=X'
+            exchange_hist = yf.Ticker(exchange_symbol).history(period='1d')
+            if not exchange_hist.empty:
+                exchange_rate = exchange_hist['Close'].iloc[-1]
+                latest_price *= exchange_rate
+                value_today *= exchange_rate
+
+        investment = {
+            "description": f"Investment Analysis for {symbol.upper()}",
+            "price_past": round(price_past, 2) if price_past != 'N/A' else 'N/A',
+            "num_shares": round(num_shares, 4),
+            "value_today": round(value_today, 2),
+            "price_today": round(latest_price, 2),
+            "predicted_price_future": future_prices[-1],
+            "value_future": round(value_future, 2),
+            "num_years": years
+        }
+
+        # Prepare data for the chart
+        historical_dates = hist_sorted['Date'].dt.strftime('%Y-%m-%d').tolist()
+        historical_prices = hist_sorted['Close'].tolist()
+
+        response = {
+            "investment": investment,
+            "historical": {
+                "dates": historical_dates,
+                "prices": historical_prices
+            },
+            "predicted": {
+                "dates": future_dates,
+                "prices": future_prices
+            }
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        app.logger.error(f"Error predicting stock data for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+# ... [Machine Learning end] ...
 
 
 @app.route('/')
