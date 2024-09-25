@@ -5,6 +5,16 @@ from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import mean_absolute_percentage_error
+from prophet import Prophet
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+import warnings
+import json
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
@@ -374,6 +384,155 @@ def predict_stock(symbol):
         return jsonify({"error": str(e)}), 500
 
 # ... [Machine Learning end] ...
+
+# ....[ML hard cu grafice de prediceie]....#
+
+@app.route('/api/simulate-trading-strategy', methods=['POST'])
+def simulate_trading_strategy():
+    data = request.get_json()
+    tickers = data.get('tickers', ['AAPL'])  # Dacă nu este furnizat niciun simbol, implicit este 'AAPL'
+
+    app.logger.info(f"Simulating trading strategy for tickers: {tickers}")
+
+    try:
+        # Pasul 2: Preluarea datelor
+        data = yf.download(tickers, start='2000-01-01', end='2024-09-19')
+        close = data['Close'].dropna()
+
+        if close.empty:
+            app.logger.warning(f"No data downloaded for tickers: {tickers}")
+            return jsonify({"error": "No data downloaded"}), 404
+
+        close = close.to_frame()
+        close.columns = tickers
+
+        # Prelucrarea și ingineria caracteristicilor
+        ticker = tickers[0]
+        close[f'{ticker}_Return'] = close[ticker].pct_change() * 100
+        close[f'{ticker}_Open'] = close[ticker].shift(1)
+        close[f'{ticker}_High'] = close[[ticker, f'{ticker}_Open']].max(axis=1)
+        close[f'{ticker}_Low'] = close[[ticker, f'{ticker}_Open']].min(axis=1)
+        close[f'{ticker}_High_Low_Range'] = (close[f'{ticker}_High'] - close[f'{ticker}_Low']) / close[f'{ticker}_Open'] * 100
+        close[f'{ticker}_Open_Close_Range'] = (close[ticker] - close[f'{ticker}_Open']) / close[f'{ticker}_Open'] * 100
+
+        close[f'{ticker}_Trend'] = close[ticker].rolling(window=5).mean()
+        close[f'{ticker}_Volatility'] = close[f'{ticker}_Return'].rolling(window=5).std()
+        close.dropna(inplace=True)
+
+        # Crearea variabilei țintă
+        close['Target'] = close[f'{ticker}_Open_Close_Range'].shift(-1)
+        close['Target_Label'] = close['Target'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        close.dropna(inplace=True)
+
+        # Împărțirea datelor
+        features = close[[f'{ticker}_Return', f'{ticker}_High_Low_Range', f'{ticker}_Open_Close_Range', f'{ticker}_Trend', f'{ticker}_Volatility']]
+        labels = close['Target_Label']
+        X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.10, shuffle=False)
+
+        # Normalizare și antrenarea modelului
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train_scaled, y_train)
+
+        # Evaluarea modelului
+        y_pred = clf.predict(scaler.transform(X_test))
+        test_results = X_test.copy()
+        test_results['Actual'] = y_test
+        test_results['Predicted'] = y_pred
+
+        # Simularea strategiilor de return
+        test_results['Predicted_Shifted'] = test_results['Predicted'].shift(1).fillna(0)
+        test_results['Strategy_Return'] = test_results['Predicted_Shifted'] * (close[f'{ticker}_Open_Close_Range'].iloc[X_train.shape[0]:].values)
+        test_results['Cumulative_Strategy_Return'] = test_results['Strategy_Return'].cumsum()
+        test_results['Cumulative_AAPL_Return'] = close[f'{ticker}_Open_Close_Range'].iloc[X_train.shape[0]:].cumsum()
+
+        # Pregătirea datelor pentru răspuns
+        response_data = {
+            "cumulativeStrategyReturn": test_results['Cumulative_Strategy_Return'].tolist(),
+            "cumulativeAAPLReturn": test_results['Cumulative_AAPL_Return'].tolist(),
+            "predictions": test_results[['Predicted', 'Actual', 'Strategy_Return']].tail().to_dict(orient='records')
+        }
+
+        app.logger.info("Trading strategy simulation successful.")
+        return jsonify(response_data)
+
+    except Exception as e:
+        app.logger.error(f"Error simulating trading strategy: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/machine-learning-calculation', methods=['POST'])
+def machine_learning_calculation():
+    data = request.get_json()
+    tickers = data.get('tickers', ['AAPL'])  # Utilizează AAPL ca simbol implicit
+
+    app.logger.info(f"Starting machine learning calculation for tickers: {tickers}")
+
+    try:
+        # Obține datele pentru tickere
+        data = yf.download(tickers, start='2000-01-01', end=datetime.now().strftime('%Y-%m-%d'))
+        close = data['Close'].dropna()
+
+        if close.empty:
+            app.logger.warning(f"No data found for tickers: {tickers}")
+            return jsonify({"error": "No data found"}), 404
+
+        close = close.to_frame()
+        close.columns = tickers
+
+        # Prelucrarea datelor
+        ticker = tickers[0]
+        close[f'{ticker}_Return'] = close[ticker].pct_change() * 100
+
+        # Crearea caracteristicilor suplimentare
+        close[f'{ticker}_Open'] = close[ticker].shift(1)
+        close[f'{ticker}_High'] = close[[ticker, f'{ticker}_Open']].max(axis=1)
+        close[f'{ticker}_Low'] = close[[ticker, f'{ticker}_Open']].min(axis=1)
+        close[f'{ticker}_High_Low_Range'] = (close[f'{ticker}_High'] - close[f'{ticker}_Low']) / close[f'{ticker}_Open'] * 100
+        close[f'{ticker}_Open_Close_Range'] = (close[ticker] - close[f'{ticker}_Open']) / close[f'{ticker}_Open'] * 100
+        close[f'{ticker}_Trend'] = close[ticker].rolling(window=5).mean()  # 5-day moving average
+        close[f'{ticker}_Volatility'] = close[f'{ticker}_Return'].rolling(window=5).std()  # 5-day volatility
+
+        # Dropping rows with NaN values
+        close.dropna(inplace=True)
+
+        # Crearea variabilei țintă
+        close['Target'] = close[f'{ticker}_Open_Close_Range'].shift(-1)
+
+        # Crearea etichetelor pentru țintă
+        close['Target_Label'] = close['Target'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        close.dropna(inplace=True)
+
+        # Împărțirea datelor
+        features = close[[f'{ticker}_Return', f'{ticker}_High_Low_Range', f'{ticker}_Open_Close_Range', f'{ticker}_Trend', f'{ticker}_Volatility']]
+        labels = close['Target_Label']
+        X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.10, shuffle=False)
+
+        # Normalizarea și antrenarea modelului
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train_scaled, y_train)
+
+        # Evaluarea modelului
+        y_pred = clf.predict(scaler.transform(X_test))
+        predictions = [int(pred) for pred in y_pred]  # Conversie la int
+
+        # Pregătirea datelor pentru răspuns
+        response_data = {
+            "predictions": predictions,
+            "actual": [int(actual) for actual in y_test.tolist()]  # Conversie la int
+        }
+
+        app.logger.info("Machine learning calculation successful.")
+        return jsonify(response_data)
+
+    except Exception as e:
+        app.logger.error(f"Error during machine learning calculation: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+# ...............end ML hard ........#
+
 
 
 @app.route('/')
