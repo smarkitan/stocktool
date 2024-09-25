@@ -240,7 +240,8 @@ def get_simple_stock_data(symbol):
         ticker = yf.Ticker(symbol)
         stock_info = ticker.info
         company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
-
+        previous_close = stock_info['regularMarketPreviousClose']
+        
         return jsonify({
             "company": company_name,
             "symbol": symbol,
