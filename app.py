@@ -396,7 +396,7 @@ def simulate_trading_strategy():
 
     try:
         # Pasul 2: Preluarea datelor
-        data = yf.download(tickers, start='2000-01-01', end='2024-09-19')
+        data = yf.download(tickers, start='2000-01-01', end=datetime.today().strftime('%Y-%m-%d'))
         close = data['Close'].dropna()
 
         if close.empty:
