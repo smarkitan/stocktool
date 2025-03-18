@@ -37,12 +37,12 @@ def get_stock_data(symbol):
             return jsonify({"error": "No data found"}), 404
         print(f"Data for {symbol}:\n", df.head())  # ADĂUGAT pentru debugging
         latest_data = df.iloc[-1]
-        last_close_price = latest_data['Close']
+        last_close_price = latest_data['Close'].to_dict()
         last_close_date = latest_data.name.isoformat()
-        open_price = latest_data['Open']
-        high_price = latest_data['High']
-        low_price = latest_data['Low']
-        volume = latest_data['Volume']
+        open_price = latest_data['Open'].to_dict()
+        high_price = latest_data['High'].to_dict()
+        low_price = latest_data['Low'].to_dict()
+        volume = latest_data['Volume'].to_dict()
 
         ticker = yf.Ticker(symbol)
         stock_info = ticker.info
