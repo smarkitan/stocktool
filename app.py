@@ -135,7 +135,7 @@ def get_intraday_stock_data(symbol):
 
         intraday_data = {
             "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
-            "close": df['Close'].tolist(),
+            "close": df['Close'].values.tolist(),
             "open": df['Open'].tolist(),
             "high": df['High'].tolist(),
             "low": df['Low'].tolist(),
@@ -160,7 +160,7 @@ def get_intraday_short_data(symbol):
         # Return only the necessary fields for the chart
         short_intraday_data = {
             "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
-            "close": df['Close'].tolist(),
+            "close": df['Close'].values.tolist(),
             "open": df['Open'].tolist(),
         }
 
