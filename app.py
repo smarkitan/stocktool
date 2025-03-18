@@ -136,10 +136,10 @@ def get_intraday_stock_data(symbol):
         intraday_data = {
             "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
             "close": df['Close'].values.tolist(),
-            "open": df['Open'].tolist(),
-            "high": df['High'].tolist(),
-            "low": df['Low'].tolist(),
-            "volume": df['Volume'].tolist()
+            "open": df['Open'].values.tolist(),
+            "high": df['High'].values.tolist(),
+            "low": df['Low'].values.tolist(),
+            "volume": df['Volume'].values.tolist()
         }
 
         app.logger.info(f"Intraday stock data fetched successfully for symbol: {symbol}")
@@ -161,7 +161,7 @@ def get_intraday_short_data(symbol):
         short_intraday_data = {
             "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
             "close": df['Close'].values.tolist(),
-            "open": df['Open'].tolist(),
+            "open": df['Open'].values.tolist(),
         }
 
         app.logger.info(f"Short intraday stock data fetched successfully for symbol: {symbol}")
