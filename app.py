@@ -24,11 +24,11 @@ def get_stock_data(symbol):
     app.logger.info(f"Fetching stock data for symbol: {symbol}")
     try:
         df = yf.download(symbol, period="1d", interval="1d")
-        print(f"Data for {symbol}:\n", df.head())  # ADĂUGAT pentru debugging
+
         if df.empty:
             app.logger.warning(f"No data found for symbol: {symbol}")
             return jsonify({"error": "No data found"}), 404
-
+        print(f"Data for {symbol}:\n", df.head())  # ADĂUGAT pentru debugging
         latest_data = df.iloc[-1]
         last_close_price = latest_data['Close']
         last_close_date = latest_data.name.isoformat()
