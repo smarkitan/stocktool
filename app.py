@@ -15,6 +15,7 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 import warnings
 import json
+import requests
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
