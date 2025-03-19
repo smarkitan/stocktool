@@ -425,12 +425,16 @@ def simulate_trading_strategy():
         
         close.columns = tickers  # Ajustează numele coloanelor
 
-        # Returnează datele procesate ca răspuns JSON (poți schimba în funcție de ce ai nevoie)
+        # Convertim indexul `DatetimeIndex` în string
+        close.index = close.index.strftime('%Y-%m-%d')
+
+        # Returnăm datele într-un format JSON serializabil
         return jsonify({"message": "Data processed successfully", "data": close.to_dict()}), 200
 
     except Exception as e:
         app.logger.error(f"Error simulating trading strategy: {str(e)}", exc_info=True)
         return jsonify({"error": f"Failed to simulate trading strategy: {str(e)}"}), 500
+
 
 
         # Prelucrarea și ingineria caracteristicilor
