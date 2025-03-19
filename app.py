@@ -252,7 +252,12 @@ def get_simple_stock_data(symbol):
         df = yf.download(symbol, period="1d", interval="1d")
         if df.empty:
             return jsonify({"error": "No data found"}), 404
-
+            
+        # Verifica dacă toate coloanele necesare sunt prezente
+        required_columns = ['Open', 'Close']
+        if not all(col in df.columns for col in required_columns):
+            return jsonify({"error": "Missing necessary data for " + symbol}), 500            
+          
         latest_data = df.iloc[-1]
         last_close_price = latest_data['Close']
         previous_close = latest_data['Open']  # Pentru exemplificare, luăm "open" ca fiind prețul de deschidere
@@ -263,6 +268,9 @@ def get_simple_stock_data(symbol):
         company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
         previous_close = stock_info['regularMarketPreviousClose']
         
+        if previous_close is None:
+            previous_close = latest_data['Open']  # Fallback la Open dacă nu e disponibil   
+            
         return jsonify({
             "company": company_name,
             "symbol": symbol,
@@ -410,7 +418,8 @@ def simulate_trading_strategy():
         if close.empty:
             app.logger.warning(f"No data downloaded for tickers: {tickers}")
             return jsonify({"error": "No data downloaded"}), 404
-
+            
+    if isinstance(close, pd.Series):
         close = close.to_frame()
         close.columns = tickers
 
