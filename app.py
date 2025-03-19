@@ -418,10 +418,20 @@ def simulate_trading_strategy():
         if close.empty:
             app.logger.warning(f"No data downloaded for tickers: {tickers}")
             return jsonify({"error": "No data downloaded"}), 404
-            
-    if isinstance(close, pd.Series):
-        close = close.to_frame()
-        close.columns = tickers
+
+        # Asigură-te că `close` este un DataFrame
+        if isinstance(close, pd.Series):
+            close = close.to_frame()
+        
+        close.columns = tickers  # Ajustează numele coloanelor
+
+        # Returnează datele procesate ca răspuns JSON (poți schimba în funcție de ce ai nevoie)
+        return jsonify({"message": "Data processed successfully", "data": close.to_dict()}), 200
+
+    except Exception as e:
+        app.logger.error(f"Error simulating trading strategy: {str(e)}", exc_info=True)
+        return jsonify({"error": f"Failed to simulate trading strategy: {str(e)}"}), 500
+
 
         # Prelucrarea și ingineria caracteristicilor
         ticker = tickers[0]
