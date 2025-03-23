@@ -248,38 +248,32 @@ def test_stock_data_route(symbol):
 @app.route('/api/stock/simple/<symbol>', methods=['GET'])
 def get_simple_stock_data(symbol):
     try:
-        # Preluăm datele istorice pentru o zi (ultima zi)
         df = yf.download(symbol, period="1d", interval="1d")
         if df.empty:
             return jsonify({"error": "No data found"}), 404
-            
-        # Verifica dacă toate coloanele necesare sunt prezente
-        required_columns = ['Open', 'Close']
-        if not all(col in df.columns for col in required_columns):
-            return jsonify({"error": "Missing necessary data for " + symbol}), 500            
-          
+
         latest_data = df.iloc[-1]
         last_close_price = latest_data['Close']
-        previous_close = latest_data['Open']  # Pentru exemplificare, luăm "open" ca fiind prețul de deschidere
+        previous_close = latest_data['Open']  # fallback
 
-        # Extragem numele companiei folosind Ticker.info
         ticker = yf.Ticker(symbol)
         stock_info = ticker.info
         company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
-        previous_close = stock_info['regularMarketPreviousClose']
-        
-        if previous_close is None:
-            previous_close = latest_data['Open']  # Fallback la Open dacă nu e disponibil   
-            
+
+        previous_close = stock_info.get('regularMarketPreviousClose', previous_close)
+
+        # ❌ PROBLEMA: dacă `latest_data['Close']` este un Series, jsonify nu știe să o serializeze
+        # ✅ SOLUȚIE: convertim valorile la tipuri native Python (float, string etc.)
         return jsonify({
             "company": company_name,
             "symbol": symbol,
-            "lastClosePrice": last_close_price,
-            "previousClose": previous_close
+            "lastClosePrice": float(last_close_price),
+            "previousClose": float(previous_close)
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 
 
