@@ -183,11 +183,11 @@ def get_stock_historical_data(symbol):
         
         data = {
             "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
-            "close": hist['Close'].tolist(),
-            "open": hist['Open'].tolist(),
-            "high": hist['High'].tolist(),
-            "low": hist['Low'].tolist(),
-            "volume": hist['Volume'].tolist(),
+            "close": hist['Close'].values.tolist(),
+            "open": hist['Open'].values.tolist(),
+            "high": hist['High'].values.tolist(),
+            "low": hist['Low']v.tolist(),
+            "volume": hist['Volume'].values.tolist(),
         }
         app.logger.info(f"Historical stock data fetched successfully for symbol: {symbol}")
         return jsonify(data)
@@ -225,11 +225,11 @@ def test_stock_data_route(symbol):
 
         data = {
             "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
-            "close": hist['Close'].tolist(),
-            "open": hist['Open'].tolist(),
-            "high": hist['High'].tolist(),
-            "low": hist['Low'].tolist(),
-            "volume": hist['Volume'].tolist(),
+            "close": hist['Close'].values.tolist(),
+            "open": hist['Open'].values.tolist(),
+            "high": hist['High'].values.tolist(),
+            "low": hist['Low'].values.tolist(),
+            "volume": hist['Volume'].values.tolist(),
             "lastDividendValue": last_dividend_value,
             "lastDividendDate": last_dividend_date,
             "lastClosePrice": last_close_price,
