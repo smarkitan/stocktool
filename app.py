@@ -186,7 +186,7 @@ def get_stock_historical_data(symbol):
             "close": hist['Close'].values.tolist(),
             "open": hist['Open'].values.tolist(),
             "high": hist['High'].values.tolist(),
-            "low": hist['Low']v.tolist(),
+            "low": hist['Low'].values.tolist(),
             "volume": hist['Volume'].values.tolist(),
         }
         app.logger.info(f"Historical stock data fetched successfully for symbol: {symbol}")
