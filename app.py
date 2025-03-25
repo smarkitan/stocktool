@@ -105,22 +105,33 @@ def get_stock_news(symbol):
     app.logger.info(f"Fetching stock news for symbol: {symbol}")
     try:
         ticker = yf.Ticker(symbol)
-        print("NEWS DEBUG >>>", ticker.news)
-        news_data = ticker.news
+        raw_news_data = ticker.news
 
-        if not news_data:
+        if not raw_news_data:
             app.logger.warning(f"No news found for symbol: {symbol}")
-            return jsonify({"error": "No news found"}), 404
+            return jsonify([])
 
-        news_items = [{
-            "title": item.get('title'),
-            "link": item.get('link'),
-            "publisher": item.get('publisher'),
-            "publishedDate": item.get('providerPublishTime')
-        } for item in news_data]
+        # Funcție pentru a converti data ISO în timestamp UNIX
+        def convert_to_timestamp(iso_str):
+            try:
+                return int(datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp())
+            except:
+                return None
+
+        # Extragem corect datele din structura nested
+        news_items = []
+        for item in raw_news_data:
+            content = item.get("content", {})
+            news_items.append({
+                "title": content.get("title"),
+                "link": content.get("canonicalUrl", {}).get("url"),
+                "publisher": content.get("provider", {}).get("displayName"),
+                "publishedDate": convert_to_timestamp(content.get("pubDate"))
+            })
 
         app.logger.info(f"Stock news fetched successfully for symbol: {symbol}")
         return jsonify(news_items)
+
     except Exception as e:
         app.logger.error(f"Error fetching stock news for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
