@@ -105,6 +105,7 @@ def get_stock_news(symbol):
     app.logger.info(f"Fetching stock news for symbol: {symbol}")
     try:
         ticker = yf.Ticker(symbol)
+        print("NEWS DEBUG >>>", ticker.news)
         news_data = ticker.news
 
         if not news_data:
