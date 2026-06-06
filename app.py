@@ -16,6 +16,8 @@ from tensorflow.keras.callbacks import EarlyStopping
 import warnings
 import json
 import requests
+import urllib.parse
+import urllib.request
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "https://stefanstocktool.netlify.app"}})
@@ -26,76 +28,172 @@ HEADERS = {
 session = requests.Session()
 session.headers.update(HEADERS)
 
+def _safe_float(value, default=None):
+    try:
+        if value is None:
+            return default
+        if hasattr(value, "item"):
+            value = value.item()
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default=None):
+    try:
+        if value is None:
+            return default
+        if hasattr(value, "item"):
+            value = value.item()
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_unix(date_string):
+    if not date_string:
+        return None
+    return int(datetime.fromisoformat(date_string).timestamp())
+
+
+def _format_iso(ts):
+    return datetime.utcfromtimestamp(int(ts)).isoformat()
+
+
+def yahoo_chart(symbol, *, range_value=None, interval="1d", start_date=None, end_date=None):
+    """Fetch public quote/history data from Yahoo Chart API without yfinance crumb negotiation.
+
+    Render/yfinance is currently rate-limited by Yahoo (429). The public chart endpoint
+    still returns data reliably with browser headers and crumb=none.
+    """
+    params = {"interval": interval, "events": "history", "crumb": "none"}
+    if range_value:
+        params["range"] = range_value
+    else:
+        period1 = _to_unix(start_date)
+        period2 = _to_unix(end_date) or int(datetime.utcnow().timestamp())
+        if period1 is None:
+            raise ValueError("start_date is required")
+        params["period1"] = str(period1)
+        params["period2"] = str(period2)
+
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/" + urllib.parse.quote(symbol.upper()) + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={**HEADERS, "Accept": "application/json,text/plain,*/*"})
+    with urllib.request.urlopen(req, timeout=20) as response:
+        payload = response.read().decode("utf-8")
+    data = json.loads(payload)
+    chart = data.get("chart", {})
+    if chart.get("error"):
+        raise RuntimeError(chart["error"])
+    results = chart.get("result") or []
+    if not results:
+        raise RuntimeError("No Yahoo chart data found")
+    return results[0]
+
+
+def chart_to_rows(result, date_format="iso"):
+    timestamps = result.get("timestamp") or []
+    quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+    opens = quote.get("open") or []
+    highs = quote.get("high") or []
+    lows = quote.get("low") or []
+    closes = quote.get("close") or []
+    volumes = quote.get("volume") or []
+    rows = []
+    for idx, ts in enumerate(timestamps):
+        close = _safe_float(closes[idx] if idx < len(closes) else None)
+        if close is None:
+            continue
+        if date_format == "intraday":
+            dt = datetime.fromtimestamp(ts).strftime('%b %d, %I:%M %p')
+        elif date_format == "date":
+            dt = datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d')
+        else:
+            dt = _format_iso(ts)
+        rows.append({
+            "datetime": dt,
+            "close": close,
+            "open": _safe_float(opens[idx] if idx < len(opens) else None, close),
+            "high": _safe_float(highs[idx] if idx < len(highs) else None, close),
+            "low": _safe_float(lows[idx] if idx < len(lows) else None, close),
+            "volume": _safe_int(volumes[idx] if idx < len(volumes) else None, 0),
+        })
+    return rows
+
+
+def rows_payload(rows):
+    return {
+        "datetime": [row["datetime"] for row in rows],
+        "close": [row["close"] for row in rows],
+        "open": [row["open"] for row in rows],
+        "high": [row["high"] for row in rows],
+        "low": [row["low"] for row in rows],
+        "volume": [row["volume"] for row in rows],
+    }
+
+
+def build_quote_payload(symbol):
+    result = yahoo_chart(symbol, range_value="5d", interval="1d")
+    meta = result.get("meta") or {}
+    rows = chart_to_rows(result)
+    if not rows:
+        raise RuntimeError("No data found")
+    latest = rows[-1]
+    company_name = meta.get("longName") or meta.get("shortName") or symbol.upper()
+    exchange_name = meta.get("fullExchangeName") or meta.get("exchangeName") or "N/A"
+    currency = meta.get("currency") or "USD"
+    price = _safe_float(meta.get("regularMarketPrice"), latest["close"])
+    return {
+        "companyName": company_name,
+        "lastClosePrice": price,
+        "lastCloseDate": _format_iso(meta.get("regularMarketTime")) if meta.get("regularMarketTime") else latest["datetime"],
+        "openPrice": latest["open"],
+        "highPrice": latest["high"],
+        "lowPrice": latest["low"],
+        "volume": latest["volume"],
+        "exchangeInfo": f"{exchange_name} • {currency}",
+        "compareLink": f"/compare/{symbol.upper()}",
+        "previousClose": _safe_float(meta.get("chartPreviousClose"), "N/A"),
+        "marketCap": meta.get("marketCap", "N/A"),
+        "open": latest["open"],
+        "beta": "N/A",
+        "bid": "N/A",
+        "bidSize": "N/A",
+        "trailingPE": "N/A",
+        "ask": "N/A",
+        "askSize": "N/A",
+        "trailingEps": "N/A",
+        "regularMarketDayLow": _safe_float(meta.get("regularMarketDayLow"), latest["low"]),
+        "regularMarketDayHigh": _safe_float(meta.get("regularMarketDayHigh"), latest["high"]),
+        "fiftyTwoWeekLow": meta.get("fiftyTwoWeekLow", "N/A"),
+        "fiftyTwoWeekHigh": meta.get("fiftyTwoWeekHigh", "N/A"),
+        "dividendRate": "N/A",
+        "dividendYield": "N/A",
+        "regularMarketVolume": meta.get("regularMarketVolume", latest["volume"]),
+        "exDividendDate": "N/A",
+        "averageVolume": "N/A",
+        "targetMeanPrice": "N/A",
+        "enterpriseValue": "N/A",
+        "priceToBook": "N/A",
+        "priceToSalesTrailing12Months": "N/A",
+        "enterpriseToEbitda": "N/A",
+        "operatingMargins": "N/A",
+        "grossMargins": "N/A",
+        "profitMargins": "N/A",
+        "earningsGrowth": "N/A",
+        "sector": "N/A",
+        "industry": "N/A",
+        "totalRevenue": "N/A",
+        "revenueGrowth": "N/A",
+        "operatingCashflow": "N/A",
+    }
+
+
 @app.route('/api/stock/<symbol>')
 def get_stock_data(symbol):
     app.logger.info(f"Fetching stock data for symbol: {symbol}")
     try:
-        df = yf.download(symbol, period="1d", interval="1d")
-
-        if df.empty:
-            app.logger.warning(f"No data found for symbol: {symbol}")
-            return jsonify({"error": "No data found"}), 404
-        print(f"Data for {symbol}:\n", df.head())  # ADĂUGAT pentru debugging
-        latest_data = df.iloc[-1]
-        last_close_price = latest_data['Close'].to_dict()
-        last_close_date = latest_data.name.isoformat()
-        open_price = latest_data['Open'].to_dict()
-        high_price = latest_data['High'].to_dict()
-        low_price = latest_data['Low'].to_dict()
-        volume = latest_data['Volume'].to_dict()
-
-        ticker = yf.Ticker(symbol)
-        stock_info = ticker.info
-
-        company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
-        exchange_info = "NasdaqGS - Nasdaq Real Time Price • USD"
-        compare_link = f"/compare/{symbol}"
-
-        app.logger.info(f"Data fetched successfully for symbol: {symbol}")
-        return jsonify({
-            "companyName": company_name,
-            "lastClosePrice": last_close_price,
-            "lastCloseDate": last_close_date,
-            "openPrice": open_price,
-            "highPrice": high_price,
-            "lowPrice": low_price,
-            "volume": volume,
-            "exchangeInfo": exchange_info,
-            "compareLink": compare_link,
-            "previousClose": stock_info.get('regularMarketPreviousClose', 'N/A'),
-             "marketCap": stock_info.get('marketCap', 'N/A'),
-            "open": stock_info.get('regularMarketOpen', 'N/A'),
-            "beta": stock_info.get('beta', 'N/A'),
-            "bid": stock_info.get('bid', 'N/A'),
-            "bidSize": stock_info.get('bidSize', 'N/A'),
-            "trailingPE": stock_info.get('trailingPE', 'N/A'),
-            "ask": stock_info.get('ask', 'N/A'),
-            "askSize": stock_info.get('askSize', 'N/A'),
-            "trailingEps": stock_info.get('trailingEps', 'N/A'),
-            "regularMarketDayLow": stock_info.get('regularMarketDayLow', 'N/A'),
-            "regularMarketDayHigh": stock_info.get('regularMarketDayHigh', 'N/A'),
-            "fiftyTwoWeekLow": stock_info.get('fiftyTwoWeekLow', 'N/A'),
-            "fiftyTwoWeekHigh": stock_info.get('fiftyTwoWeekHigh', 'N/A'),
-            "dividendRate": stock_info.get('dividendRate', 'N/A'),
-            "dividendYield": stock_info.get('dividendYield', 'N/A'),
-            "regularMarketVolume": stock_info.get('regularMarketVolume', 'N/A'),
-            "exDividendDate": stock_info.get('exDividendDate', 'N/A'),
-            "averageVolume": stock_info.get('averageVolume', 'N/A'),
-            "targetMeanPrice": stock_info.get('targetMeanPrice', 'N/A'),
-            "enterpriseValue": stock_info.get('enterpriseValue', 'N/A'),
-            "priceToBook": stock_info.get('priceToBook', 'N/A'),
-            "priceToSalesTrailing12Months": stock_info.get('priceToSalesTrailing12Months', 'N/A'),
-            "enterpriseToEbitda": stock_info.get('enterpriseToEbitda', 'N/A'),
-            "operatingMargins": stock_info.get('operatingMargins', 'N/A'),
-            "grossMargins": stock_info.get('grossMargins', 'N/A'),
-            "profitMargins": stock_info.get('profitMargins', 'N/A'),
-            "earningsGrowth": stock_info.get('earningsGrowth', 'N/A'),
-            "sector": stock_info.get('sector', 'N/A'),
-            "industry": stock_info.get('industry', 'N/A'),
-            "totalRevenue": stock_info.get('totalRevenue', 'N/A'),
-            "revenueGrowth": stock_info.get('revenueGrowth', 'N/A'),
-            "operatingCashflow": stock_info.get('operatingCashflow', 'N/A')
-        })
+        return jsonify(build_quote_payload(symbol))
     except Exception as e:
         app.logger.error(f"Error fetching stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -140,22 +238,11 @@ def get_stock_news(symbol):
 def get_intraday_stock_data(symbol):
     app.logger.info(f"Fetching intraday stock data for symbol: {symbol}")
     try:
-        df = yf.download(symbol, period="1d", interval="1m")
-        if df.empty:
-            app.logger.warning(f"No intraday data found for symbol: {symbol}")
+        result = yahoo_chart(symbol, range_value="1d", interval="1m")
+        rows = chart_to_rows(result, date_format="intraday")
+        if not rows:
             return jsonify({"error": "No intraday data found"}), 404
-
-        intraday_data = {
-            "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
-            "close": df['Close'].values.tolist(),
-            "open": df['Open'].values.tolist(),
-            "high": df['High'].values.tolist(),
-            "low": df['Low'].values.tolist(),
-            "volume": df['Volume'].values.tolist()
-        }
-
-        app.logger.info(f"Intraday stock data fetched successfully for symbol: {symbol}")
-        return jsonify(intraday_data)
+        return jsonify(rows_payload(rows))
     except Exception as e:
         app.logger.error(f"Error fetching intraday data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -164,45 +251,26 @@ def get_intraday_stock_data(symbol):
 def get_intraday_short_data(symbol):
     app.logger.info(f"Fetching short intraday stock data for symbol: {symbol}")
     try:
-        df = yf.download(symbol, period="1d", interval="1m")
-        if df.empty:
-            app.logger.warning(f"No intraday data found for symbol: {symbol}")
+        result = yahoo_chart(symbol, range_value="1d", interval="1m")
+        rows = chart_to_rows(result, date_format="intraday")
+        if not rows:
             return jsonify({"error": "No intraday data found"}), 404
-
-        # Return only the necessary fields for the chart
-        short_intraday_data = {
-            "datetime": df.index.strftime('%b %d, %I:%M %p').tolist(),
-            "close": df['Close'].values.tolist(),
-            "open": df['Open'].values.tolist(),
-        }
-
-        app.logger.info(f"Short intraday stock data fetched successfully for symbol: {symbol}")
-        return jsonify(short_intraday_data)
+        payload = rows_payload(rows)
+        return jsonify({"datetime": payload["datetime"], "close": payload["close"], "open": payload["open"]})
     except Exception as e:
         app.logger.error(f"Error fetching short intraday data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stock/<symbol>/historical', methods=['GET'])
 def get_stock_historical_data(symbol):
-    period = request.args.get('period', '1d')
+    period = request.args.get('period', '1mo')
     app.logger.info(f"Fetching historical stock data for symbol: {symbol} with period: {period}")
     try:
-        stock = yf.Ticker(symbol)
-        hist = stock.history(period=period)
-        if hist.empty:
-            app.logger.warning(f"No historical data found for symbol: {symbol} with period: {period}")
+        result = yahoo_chart(symbol, range_value=period, interval="1d")
+        rows = chart_to_rows(result, date_format="date")
+        if not rows:
             return jsonify({"error": "No historical data found"}), 404
-        
-        data = {
-            "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
-            "close": hist['Close'].values.tolist(),
-            "open": hist['Open'].values.tolist(),
-            "high": hist['High'].values.tolist(),
-            "low": hist['Low'].values.tolist(),
-            "volume": hist['Volume'].values.tolist(),
-        }
-        app.logger.info(f"Historical stock data fetched successfully for symbol: {symbol}")
-        return jsonify(data)
+        return jsonify(rows_payload(rows))
     except Exception as e:
         app.logger.error(f"Error fetching historical data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -211,46 +279,21 @@ def get_stock_historical_data(symbol):
 def test_stock_data_route(symbol):
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
-
     app.logger.info(f"Fetching test stock data for symbol: {symbol} from {start_date} to {end_date}")
     try:
-        stock = yf.Ticker(symbol)
-        hist = stock.history(start=start_date, end=end_date)
-
-        if hist.empty:
-            app.logger.warning(f"No data found for symbol: {symbol} from {start_date} to {end_date}")
+        result = yahoo_chart(symbol, start_date=start_date, end_date=end_date, interval="1d")
+        rows = chart_to_rows(result, date_format="date")
+        if not rows:
             return jsonify({"error": f"No data found for {symbol} from {start_date} to {end_date}"}), 404
-        
-        most_recent_hist = stock.history(period='1d')
-        latest_data = most_recent_hist.iloc[-1] if not most_recent_hist.empty else None
-
-        if latest_data is not None:
-            last_close_price = latest_data['Close']
-            last_close_date = latest_data.name.isoformat()
-        else:
-            last_close_price = 'N/A'
-            last_close_date = 'N/A'
-
-        info = stock.info
-        last_dividend_value = info.get('dividendRate', 'N/A')
-        last_dividend_date = info.get('exDividendDate', 'N/A')
-
-        data = {
-            "datetime": hist.index.strftime('%Y-%m-%d').tolist(),
-            "close": hist['Close'].values.tolist(),
-            "open": hist['Open'].values.tolist(),
-            "high": hist['High'].values.tolist(),
-            "low": hist['Low'].values.tolist(),
-            "volume": hist['Volume'].values.tolist(),
-            "lastDividendValue": last_dividend_value,
-            "lastDividendDate": last_dividend_date,
-            "lastClosePrice": last_close_price,
-            "lastCloseDate": last_close_date
-        }
-
-        app.logger.info(f"Test stock data fetched successfully for symbol: {symbol}")
+        latest = build_quote_payload(symbol)
+        data = rows_payload(rows)
+        data.update({
+            "lastDividendValue": "N/A",
+            "lastDividendDate": "N/A",
+            "lastClosePrice": latest["lastClosePrice"],
+            "lastCloseDate": latest["lastCloseDate"],
+        })
         return jsonify(data)
-
     except Exception as e:
         app.logger.error(f"Error fetching test stock data for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -260,32 +303,16 @@ def test_stock_data_route(symbol):
 @app.route('/api/stock/simple/<symbol>', methods=['GET'])
 def get_simple_stock_data(symbol):
     try:
-        df = yf.download(symbol, period="1d", interval="1d")
-        if df.empty:
-            return jsonify({"error": "No data found"}), 404
-
-        latest_data = df.iloc[-1]
-        last_close_price = latest_data['Close']
-        previous_close = latest_data['Open']  # fallback
-
-        ticker = yf.Ticker(symbol)
-        stock_info = ticker.info
-        company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
-
-        previous_close = stock_info.get('regularMarketPreviousClose', previous_close)
-
-        # ❌ PROBLEMA: dacă `latest_data['Close']` este un Series, jsonify nu știe să o serializeze
-        # ✅ SOLUȚIE: convertim valorile la tipuri native Python (float, string etc.)
+        data = build_quote_payload(symbol)
         return jsonify({
-            "company": company_name,
-            "symbol": symbol,
-            "lastClosePrice": float(last_close_price),
-            "previousClose": float(previous_close)
+            "company": data["companyName"],
+            "companyName": data["companyName"],
+            "symbol": symbol.upper(),
+            "lastClosePrice": data["lastClosePrice"],
+            "previousClose": data["previousClose"],
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 
 
