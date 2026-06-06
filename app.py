@@ -143,14 +143,18 @@ def build_quote_payload(symbol):
     exchange_name = meta.get("fullExchangeName") or meta.get("exchangeName") or "N/A"
     currency = meta.get("currency") or "USD"
     price = _safe_float(meta.get("regularMarketPrice"), latest["close"])
+    symbol_key = symbol.upper()
     return {
         "companyName": company_name,
-        "lastClosePrice": price,
+        # The existing React frontend expects the detailed /api/stock payload to
+        # mirror yfinance's old multi-index shape: price fields are objects keyed
+        # by symbol (for example {"AAPL": 307.34}). Keep that contract intact.
+        "lastClosePrice": {symbol_key: price},
         "lastCloseDate": _format_iso(meta.get("regularMarketTime")) if meta.get("regularMarketTime") else latest["datetime"],
-        "openPrice": latest["open"],
-        "highPrice": latest["high"],
-        "lowPrice": latest["low"],
-        "volume": latest["volume"],
+        "openPrice": {symbol_key: latest["open"]},
+        "highPrice": {symbol_key: latest["high"]},
+        "lowPrice": {symbol_key: latest["low"]},
+        "volume": {symbol_key: latest["volume"]},
         "exchangeInfo": f"{exchange_name} • {currency}",
         "compareLink": f"/compare/{symbol.upper()}",
         "previousClose": _safe_float(meta.get("chartPreviousClose"), "N/A"),
@@ -290,7 +294,7 @@ def test_stock_data_route(symbol):
         data.update({
             "lastDividendValue": "N/A",
             "lastDividendDate": "N/A",
-            "lastClosePrice": latest["lastClosePrice"],
+            "lastClosePrice": latest["lastClosePrice"].get(symbol.upper()) if isinstance(latest["lastClosePrice"], dict) else latest["lastClosePrice"],
             "lastCloseDate": latest["lastCloseDate"],
         })
         return jsonify(data)
@@ -304,11 +308,13 @@ def test_stock_data_route(symbol):
 def get_simple_stock_data(symbol):
     try:
         data = build_quote_payload(symbol)
+        symbol_key = symbol.upper()
+        price = data["lastClosePrice"].get(symbol_key) if isinstance(data["lastClosePrice"], dict) else data["lastClosePrice"]
         return jsonify({
             "company": data["companyName"],
             "companyName": data["companyName"],
-            "symbol": symbol.upper(),
-            "lastClosePrice": data["lastClosePrice"],
+            "symbol": symbol_key,
+            "lastClosePrice": price,
             "previousClose": data["previousClose"],
         })
     except Exception as e:
