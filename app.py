@@ -328,82 +328,62 @@ def get_simple_stock_data(symbol):
 
 @app.route('/api/stock/<symbol>/predict', methods=['GET'])
 def predict_stock(symbol):
-    # Retrieve query parameters with default values
     amount = float(request.args.get('amount', 1000))
     currency = request.args.get('currency', 'USD').upper()
     years = int(request.args.get('years', 5))
 
     try:
-        # Fetch historical stock data with maximum available period
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period='max')
-        if hist.empty:
-            app.logger.warning(f"No historical data found for symbol: {symbol}")
+        # yfinance is rate-limited on Render, so use the same Yahoo Chart API
+        # fallback as the stock/calculator endpoints. Ten years is enough for
+        # the current prediction UI and keeps the payload reasonably small.
+        result = yahoo_chart(symbol, range_value='10y', interval='1d')
+        rows = chart_to_rows(result, date_format='date')
+        if not rows:
             return jsonify({"error": "No historical data found"}), 404
 
-        hist = hist.reset_index()
-        hist['Date'] = pd.to_datetime(hist['Date'])
+        meta = result.get('meta') or {}
+        latest_row = rows[-1]
+        latest_date = datetime.strptime(latest_row['datetime'], '%Y-%m-%d')
+        latest_price = _safe_float(meta.get('regularMarketPrice'), latest_row['close'])
 
-        # Get the latest available date and closing price
-        latest_date = hist['Date'].max()
-        latest_price = hist.loc[hist['Date'] == latest_date, 'Close'].values[0]
+        past_cutoff = latest_date - pd.DateOffset(years=years)
+        past_rows = [row for row in rows if datetime.strptime(row['datetime'], '%Y-%m-%d') <= past_cutoff]
+        price_past = past_rows[-1]['close'] if past_rows else 'N/A'
 
-        # Calculate the date 'years' ago
-        past_date = latest_date - pd.DateOffset(years=years)
-        past_data = hist[hist['Date'] <= past_date]
+        dates = [datetime.strptime(row['datetime'], '%Y-%m-%d') for row in rows]
+        prices = [row['close'] for row in rows]
+        X = np.array([d.toordinal() for d in dates]).reshape(-1, 1)
+        y = np.array(prices)
 
-        if past_data.empty:
-            app.logger.warning(f"Not enough historical data to get price {years} years ago for symbol: {symbol}")
-            price_past = 'N/A'
-        else:
-            closest_past_date = past_data['Date'].max()
-            price_past = hist.loc[hist['Date'] == closest_past_date, 'Close'].values[0]
-
-        # Prepare data for the Linear Regression model
-        hist_sorted = hist.sort_values('Date')
-        hist_sorted['Date_ordinal'] = hist_sorted['Date'].map(datetime.toordinal)
-        X = hist_sorted['Date_ordinal'].values.reshape(-1, 1)
-        y = hist_sorted['Close'].values
-
-        # Train the Linear Regression model
         model = LinearRegression()
         model.fit(X, y)
 
-        # Predict future prices for each year
         future_dates = []
         future_prices = []
         for i in range(1, years + 1):
             year_future_date = latest_date + pd.DateOffset(years=i)
-            year_future_date_ordinal = year_future_date.toordinal()
-            price_pred = model.predict(np.array([[year_future_date_ordinal]]))[0]
-            price_pred = max(0, price_pred)  # Ensure non-negative prices
-
-            # Currency conversion if needed
-            if currency == 'EUR':
-                exchange_symbol = 'USDEUR=X'
-                exchange_hist = yf.Ticker(exchange_symbol).history(period='1d')
-                if exchange_hist.empty:
-                    app.logger.warning(f"No exchange rate data found for symbol: {exchange_symbol}")
-                    return jsonify({"error": "No exchange rate data found"}), 404
-                exchange_rate = exchange_hist['Close'].iloc[-1]
-                price_pred *= exchange_rate
-
+            predicted = model.predict(np.array([[year_future_date.toordinal()]]))[0]
+            future_prices.append(round(max(0, float(predicted)), 2))
             future_dates.append(year_future_date.strftime('%Y-%m-%d'))
-            future_prices.append(round(price_pred, 2))
 
-        # Calculate investment details
-        num_shares = amount / latest_price
-        value_today = num_shares * latest_price
-        value_future = num_shares * future_prices[-1]
-
-        # Currency conversion for current prices if needed
+        exchange_rate = 1.0
         if currency == 'EUR':
-            exchange_symbol = 'USDEUR=X'
-            exchange_hist = yf.Ticker(exchange_symbol).history(period='1d')
-            if not exchange_hist.empty:
-                exchange_rate = exchange_hist['Close'].iloc[-1]
-                latest_price *= exchange_rate
-                value_today *= exchange_rate
+            try:
+                fx = build_quote_payload('USDEUR=X')
+                fx_price = fx.get('lastClosePrice')
+                exchange_rate = fx_price.get('USDEUR=X') if isinstance(fx_price, dict) else fx_price
+                exchange_rate = _safe_float(exchange_rate, 1.0)
+            except Exception:
+                exchange_rate = 1.0
+
+            latest_price *= exchange_rate
+            if price_past != 'N/A':
+                price_past *= exchange_rate
+            future_prices = [round(price * exchange_rate, 2) for price in future_prices]
+
+        num_shares = amount / latest_price if latest_price else 0
+        value_today = num_shares * latest_price
+        value_future = num_shares * future_prices[-1] if future_prices else 0
 
         investment = {
             "description": f"Investment Analysis for {symbol.upper()}",
@@ -411,20 +391,17 @@ def predict_stock(symbol):
             "num_shares": round(num_shares, 4),
             "value_today": round(value_today, 2),
             "price_today": round(latest_price, 2),
-            "predicted_price_future": future_prices[-1],
+            "predicted_price_future": future_prices[-1] if future_prices else 'N/A',
             "value_future": round(value_future, 2),
-            "num_years": years
+            "num_years": years,
+            "currency": currency,
         }
-
-        # Prepare data for the chart
-        historical_dates = hist_sorted['Date'].dt.strftime('%Y-%m-%d').tolist()
-        historical_prices = hist_sorted['Close'].tolist()
 
         response = {
             "investment": investment,
             "historical": {
-                "dates": historical_dates,
-                "prices": historical_prices
+                "dates": [row['datetime'] for row in rows],
+                "prices": [row['close'] * exchange_rate for row in rows]
             },
             "predicted": {
                 "dates": future_dates,
